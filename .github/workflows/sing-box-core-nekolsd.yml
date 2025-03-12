@@ -1,4 +1,4 @@
-name: Build  official core from nekolsd
+name: Build core from nekolsd
 on:
   workflow_dispatch:
   schedule:
@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      TAGS: with_quic,with_gvisor,with_utls,with_clash_api
+      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_provider
     steps:
       - uses: actions/checkout@v4.1.1
         with:

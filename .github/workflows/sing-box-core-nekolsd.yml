@@ -1,4 +1,4 @@
-name: Build  official core from sagernet
+name: Build  official core from nekolsd
 on:
   workflow_dispatch:
   schedule:
@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
-          repository: SagerNet/sing-box
-          ref: dev-next
+          repository: nekolsd/sing-box
+          ref: beta
       - name: Get latest go version
         id: go_version
         run: |
@@ -23,13 +23,13 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ^1.23
+          go-version: ^1.24
 
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r26c
+          ndk-version: r28
           add-to-path: false
           local-cache: false
 
@@ -45,7 +45,7 @@ jobs:
           CGO_ENABLED=0 GOARCH=amd64 GOOS=windows go build -v -trimpath -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -H windowsgui -s -w -buildid=" -tags ${TAGS} ./cmd/sing-box
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4.4.0
         with:
           name: sing-box_core
           path: sing-box*

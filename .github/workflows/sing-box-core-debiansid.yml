@@ -1,4 +1,4 @@
-name: Build core from nekolsd
+name: Build core from debiansid
 on:
   workflow_dispatch:
   schedule:
@@ -8,13 +8,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_provider
+      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_tailscale,with_provider
     steps:
       - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
-          ref: main-nekolsd
+          ref: dev-next-provider
       - name: Get latest go version
         id: go_version
         run: |

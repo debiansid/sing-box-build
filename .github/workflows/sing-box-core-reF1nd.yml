@@ -15,6 +15,12 @@ jobs:
           fetch-depth: 0
           repository: reF1nd/sing-box
           ref: reF1nd-dev
+          
+      - name: delete tag
+        run: |
+         cd /home/runner/work/sing-box-build/sing-box-build
+         git tag -d $(git tag -l)
+         
       - name: Get latest go version
         id: go_version
         run: |

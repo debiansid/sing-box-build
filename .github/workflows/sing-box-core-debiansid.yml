@@ -47,7 +47,7 @@ jobs:
           # Windows build without GUI (amd64)
           CGO_ENABLED=0 GOARCH=amd64 GOOS=windows go build -v -trimpath -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags ${TAGS} -o sing-box-cli.exe ./cmd/sing-box
           # Openbsd build
-          CGO_ENABLED=0 GOARCH=amd64 GOOS=openbsd bl go build -v -trimpath -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags ${TAGS} -o sing-box-openbsd ./cmd/sing-box
+          CGO_ENABLED=0 GOARCH=amd64 GOOS=openbsd  go build -v -trimpath -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags ${TAGS} -o sing-box-openbsd ./cmd/sing-box
 
 
 

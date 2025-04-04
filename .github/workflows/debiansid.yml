@@ -50,4 +50,3 @@ jobs:
         with:
           name: sing-box_core
           path: sing-box*
-sing-box-build/.github/workflows/sing-box-core-debiansid.yml at main · debiansid/sing-box-build 

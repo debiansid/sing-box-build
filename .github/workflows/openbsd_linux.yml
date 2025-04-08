@@ -33,7 +33,7 @@ jobs:
 
       - name: Install specific Go version
         run: |
-          apk del go  # Remove default Go version
+          apk del go
           wget -q https://golang.org/dl/go${{ steps.go_version.outputs.go_version }}.linux-amd64.tar.gz
           tar -C /usr/local -xzf go${{ steps.go_version.outputs.go_version }}.linux-amd64.tar.gz
           ln -sf /usr/local/go/bin/go /usr/bin/go
@@ -41,8 +41,12 @@ jobs:
 
       - name: Build core
         run: |
+          # Fix Git ownership issue
+          git config --global --add safe.directory /github/workspace
+          # Add remote and fetch
           git remote add sekai https://github.com/SagerNet/sing-box
           git fetch sekai
+          # Get version
           VERSION=$(CGO_ENABLED=0 go run ./cmd/internal/read_tag)
           # Linux build (Alpine-compatible)
           CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -v -trimpath -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags "${TAGS}" -o sing-box ./cmd/sing-box

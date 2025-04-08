@@ -42,7 +42,7 @@ jobs:
       - name: Build core
         run: |
           # Fix Git ownership issue
-          git config --global --add safe.directory /github/workspace
+          git config --global --add safe.directory /__w/sing-box-build/sing-box-build
           # Add remote and fetch
           git remote add sekai https://github.com/SagerNet/sing-box
           git fetch sekai

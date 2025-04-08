@@ -1,0 +1,56 @@
+name: Build sing-box core on Alpine Linux
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+      options: --rm
+    env:
+      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_provider
+    steps:
+      - name: Install dependencies
+        run: |
+          apk update
+          apk add --no-cache git curl go build-base
+
+      - name: Checkout code
+        uses: actions/checkout@v4.1.1
+        with:
+          fetch-depth: 0
+          repository: debiansid/sing-box
+          ref: dev-next-provider
+
+      - name: Get latest Go version
+        id: go_version
+        run: |
+          GO_VERSION=$(curl -s https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json | grep -oE '"version": "[0-9]{1}.[0-9]{1,}(.[0-9]{1,})?"' | head -1 | cut -d':' -f2 | sed 's/ //g; s/"//g')
+          echo "go_version=$GO_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Install specific Go version
+        run: |
+          apk del go  # Remove default Go version
+          wget -q https://golang.org/dl/go${{ steps.go_version.outputs.go_version }}.linux-amd64.tar.gz
+          tar -C /usr/local -xzf go${{ steps.go_version.outputs.go_version }}.linux-amd64.tar.gz
+          ln -sf /usr/local/go/bin/go /usr/bin/go
+          go version
+
+      - name: Build core
+        run: |
+          git remote add sekai https://github.com/SagerNet/sing-box
+          git fetch sekai
+          VERSION=$(CGO_ENABLED=0 go run ./cmd/internal/read_tag)
+          # Linux build (Alpine-compatible)
+          CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -v -trimpath -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags "${TAGS}" -o sing-box ./cmd/sing-box
+          # OpenBSD build
+          CGO_ENABLED=0 GOARCH=amd64 GOOS=openbsd go build -v -trimpath -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags "${TAGS}" -o sing-box-openbsd ./cmd/sing-box
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.4.0
+        with:
+          name: sing-box_core
+          path: sing-box*

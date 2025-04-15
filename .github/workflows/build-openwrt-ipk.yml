@@ -6,7 +6,7 @@ on:
 jobs:
   build-ipk:
     name: Build ARM64 OpenWrt IPK for Cortex-A53
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -14,7 +14,6 @@ jobs:
          repository: SagerNet/sing-box
          ref: dev-next
          fetch-depth: 0
-      
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -38,7 +37,7 @@ jobs:
           GOOS: linux
           GOARCH: arm64
           CGO_ENABLED: 0
-          TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_acme,with_clash_api
+          TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_reality_server,with_acme,with_clash_api
         run: |
           # Target CPU: armv8-a+crypto+crc, cortex-a53+crypto+crc
           VERSION=$(go run ./cmd/internal/read_tag)
@@ -70,6 +69,7 @@ jobs:
           cp LICENSE package/usr/share/licenses/sing-box/LICENSE
 
       - name: Build OpenWrt IPK package with fpm
+        shell: bash -e {0}
         run: |
           VERSION=$(go run ./cmd/internal/read_tag)
           fpm -s dir -t ipk \
@@ -83,7 +83,7 @@ jobs:
             --url "https://sing-box.sagernet.org/" \
             --maintainer "nekohasekai <contact-git@sekai.icu>" \
             --config-files /etc/config/sing-box \
-            --config-files /etc/sing-box/config.json \I'm
+            --config-files /etc/sing-box/config.json \
             --depends ca-bundle \
             --depends kmod-inet-diag \
             --depends kmod-tun \

@@ -11,9 +11,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-         repository: SagerNet/sing-box
-         ref: dev-next
-         fetch-depth: 0
+          repository: SagerNet/sing-box
+          ref: dev-next
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -23,8 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential
-          sudo gem install --no-document fpm
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential binutils
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -47,6 +46,13 @@ jobs:
             -o sing-box \
             ./cmd/sing-box
 
+      - name: Generate shell completions
+        run: |
+          mkdir -p release/completions
+          ./sing-box completion bash > release/completions/sing-box.bash
+          ./sing-box completion fish > release/completions/sing-box.fish
+          ./sing-box completion zsh > release/completions/sing-box.zsh
+
       - name: Create directory structure for packaging
         run: |
           mkdir -p package/usr/bin
@@ -68,11 +74,11 @@ jobs:
           cp release/completions/sing-box.zsh package/usr/share/zsh/site-functions/_sing-box
           cp LICENSE package/usr/share/licenses/sing-box/LICENSE
 
-      - name: Build OpenWrt IPK package with fpm
+      - name: Build Debian package with fpm
         shell: bash -e {0}
         run: |
           VERSION=$(go run ./cmd/internal/read_tag)
-          fpm -s dir -t ipk \
+          fpm -s dir -t deb \
             -f \
             --name sing-box \
             --version $VERSION \
@@ -100,6 +106,13 @@ jobs:
             usr/share/fish/vendor_completions.d/sing-box.fish=/usr/share/fish/vendor_completions.d/sing-box.fish \
             usr/share/zsh/site-functions/_sing-box=/usr/share/zsh/site-functions/_sing-box \
             usr/share/licenses/sing-box/LICENSE=/usr/share/licenses/sing-box/LICENSE
+
+      - name: Convert Debian package to IPK
+        shell: bash -e {0}
+        run: |
+          VERSION=$(go run ./cmd/internal/read_tag)
+          chmod +x .github/deb2ipk.sh
+          ./.github/deb2ipk.sh arm64 sing-box_${VERSION}_arm64.deb sing-box_${VERSION}_arm64.ipk
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4

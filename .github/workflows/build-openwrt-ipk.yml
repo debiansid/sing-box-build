@@ -1,4 +1,4 @@
-name: Build sing-box ARM64 OpenWrt IPK
+name: Build sing-box for OpenWrt 
 
 on:
   workflow_dispatch:

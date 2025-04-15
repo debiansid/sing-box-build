@@ -1,0 +1,108 @@
+name: Build sing-box ARM64 OpenWrt IPK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ipk:
+    name: Build ARM64 OpenWrt IPK for Cortex-A53
+    runs-on: ubuntu-24.04-arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+         repository: SagerNet/sing-box
+         ref: dev-next
+         fetch-depth: 0
+      
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.22'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential
+          sudo gem install --no-document fpm
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+
+      - name: Build sing-box for ARM64 (Cortex-A53)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 0
+          TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_acme,with_clash_api
+        run: |
+          # Target CPU: armv8-a+crypto+crc, cortex-a53+crypto+crc
+          VERSION=$(go run ./cmd/internal/read_tag)
+          go build -v -trimpath \
+            -tags "$TAGS" \
+            -ldflags "-X github.com/sagernet/sing-box/constant.Version=$VERSION -s -w -buildid=" \
+            -o sing-box \
+            ./cmd/sing-box
+
+      - name: Create directory structure for packaging
+        run: |
+          mkdir -p package/usr/bin
+          mkdir -p package/etc/sing-box
+          mkdir -p package/etc/config
+          mkdir -p package/etc/init.d
+          mkdir -p package/lib/upgrade/keep.d
+          mkdir -p package/usr/share/bash-completion/completions
+          mkdir -p package/usr/share/fish/vendor_completions.d
+          mkdir -p package/usr/share/zsh/site-functions
+          mkdir -p package/usr/share/licenses/sing-box
+          cp sing-box package/usr/bin/
+          cp release/config/config.json package/etc/sing-box/config.json
+          cp release/config/openwrt.conf package/etc/config/sing-box
+          cp release/config/openwrt.init package/etc/init.d/sing-box
+          cp release/config/openwrt.keep package/lib/upgrade/keep.d/sing-box
+          cp release/completions/sing-box.bash package/usr/share/bash-completion/completions/sing-box.bash
+          cp release/completions/sing-box.fish package/usr/share/fish/vendor_completions.d/sing-box.fish
+          cp release/completions/sing-box.zsh package/usr/share/zsh/site-functions/_sing-box
+          cp LICENSE package/usr/share/licenses/sing-box/LICENSE
+
+      - name: Build OpenWrt IPK package with fpm
+        run: |
+          VERSION=$(go run ./cmd/internal/read_tag)
+          fpm -s dir -t ipk \
+            -f \
+            --name sing-box \
+            --version $VERSION \
+            --architecture arm64 \
+            --category net \
+            --license GPL-3.0-or-later \
+            --description "The universal proxy platform." \
+            --url "https://sing-box.sagernet.org/" \
+            --maintainer "nekohasekai <contact-git@sekai.icu>" \
+            --config-files /etc/config/sing-box \
+            --config-files /etc/sing-box/config.json \I'm
+            --depends ca-bundle \
+            --depends kmod-inet-diag \
+            --depends kmod-tun \
+            --depends firewall4 \
+            --after-install release/config/openwrt.postinst \
+            --before-remove release/config/openwrt.prerm \
+            -C package \
+            usr/bin/sing-box \
+            etc/sing-box/config.json=/etc/sing-box/config.json \
+            etc/config/sing-box=/etc/config/sing-box \
+            etc/init.d/sing-box=/etc/init.d/sing-box \
+            lib/upgrade/keep.d/sing-box=/lib/upgrade/keep.d/sing-box \
+            usr/share/bash-completion/completions/sing-box.bash=/usr/share/bash-completion/completions/sing-box.bash \
+            usr/share/fish/vendor_completions.d/sing-box.fish=/usr/share/fish/vendor_completions.d/sing-box.fish \
+            usr/share/zsh/site-functions/_sing-box=/usr/share/zsh/site-functions/_sing-box \
+            usr/share/licenses/sing-box/LICENSE=/usr/share/licenses/sing-box/LICENSE
+
+      - name: Upload IPK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-box-arm64-openwrt-ipk
+          path: sing-box_*.ipk

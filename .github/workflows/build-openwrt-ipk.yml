@@ -1,4 +1,4 @@
-name: Build sing-box for OpenWrt 
+name: Build sing-box for OpenWrt
 
 on:
   workflow_dispatch:
@@ -6,8 +6,28 @@ on:
 jobs:
   build-ipk:
     name: Build ARM64 OpenWrt IPK for Cortex-A53
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-22.04-arm # Native ARM64 runner
+    container:
+      image: alpine:latest
+      options: --rm
     steps:
+      - name: Install dependencies in Alpine
+        run: |
+          apk update
+          apk add --no-cache \
+            bash \
+            git \
+            go \
+            ruby \
+            ruby-dev \
+            rubygems \
+            build-base \
+            binutils \
+            curl \
+            coreutils \
+            tar
+          gem install --no-document fpm
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -19,12 +39,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '^1.22'
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev rubygems build-essential binutils
-          sudo gem install --no-document fpm
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -71,6 +85,7 @@ jobs:
           cp release/config/openwrt.init package/etc/init.d/sing-box
           cp release/config/openwrt.keep package/lib/upgrade/keep.d/sing-box
           cp release/completions/sing-box.bash package/usr/share/bash-completion/completions/sing-box.bash
+          cp release/completions/s```yaml
           cp release/completions/sing-box.fish package/usr/share/fish/vendor_completions.d/sing-box.fish
           cp release/completions/sing-box.zsh package/usr/share/zsh/site-functions/_sing-box
           cp LICENSE package/usr/share/licenses/sing-box/LICENSE

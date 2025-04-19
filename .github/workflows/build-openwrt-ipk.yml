@@ -20,6 +20,7 @@ jobs:
             go \
             ruby \
             ruby-dev \
+            rubygems \
             build-base \
             binutils \
             curl \
@@ -27,12 +28,19 @@ jobs:
             tar
           gem install --no-document fpm
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          repository: SagerNet/sing-box
-          ref: dev-next
-          fetch-depth: 0
+      - name: Manual checkout of SagerNet/sing-box
+        run: |
+          # Configure git
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          # Clone repository
+          git clone --branch dev-next --no-tags https://github.com/SagerNet/sing-box.git .
+          # Ensure full history (fetch-depth: 0 equivalent)
+          git fetch --unshallow || true
+          # Set safe directory
+          git config --global --add safe.directory "$(pwd)"
+          # Clean working directory (similar to clean: true)
+          git clean -fdx
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -84,7 +92,6 @@ jobs:
           cp release/config/openwrt.init package/etc/init.d/sing-box
           cp release/config/openwrt.keep package/lib/upgrade/keep.d/sing-box
           cp release/completions/sing-box.bash package/usr/share/bash-completion/completions/sing-box.bash
-          cp release/completions/s```yaml
           cp release/completions/sing-box.fish package/usr/share/fish/vendor_completions.d/sing-box.fish
           cp release/completions/sing-box.zsh package/usr/share/zsh/site-functions/_sing-box
           cp LICENSE package/usr/share/licenses/sing-box/LICENSE

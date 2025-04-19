@@ -95,7 +95,6 @@ jobs:
             --depends kmod-inet-diag \
             --depends kmod-tun \
             --depends firewall4 \
-            --after-install release/config/openwrt.postinst \
             --before-remove release/config/openwrt.prerm \
             -C package \
             usr/bin/sing-box \

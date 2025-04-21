@@ -1,4 +1,4 @@
-name: Build core from debiansid
+name: Build core 1.10.1 from debiansid
 on:
   workflow_dispatch:
   schedule:
@@ -8,13 +8,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_provider
+      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_outbound_provider
     steps:
       - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
-          
+          ref: main-rnetx
       - name: Get latest go version
         id: go_version
         run: |
@@ -23,13 +23,13 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ^1.24
+          go-version: ^1.23
 
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r28
+          ndk-version: r27
           add-to-path: false
           local-cache: false
 

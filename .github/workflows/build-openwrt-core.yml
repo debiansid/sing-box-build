@@ -50,7 +50,6 @@ jobs:
           VERSION=$(CGO_ENABLED=0 go run ./cmd/internal/read_tag)
           # openwrt build (Alpine-compatible)
           CGO_ENABLED=0 GOARCH=arm64 GOOS=linux go build -v -trimpath -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags "${TAGS}" -o sing-box ./cmd/sing-box
-           ./cmd/sing-box
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4.4.0

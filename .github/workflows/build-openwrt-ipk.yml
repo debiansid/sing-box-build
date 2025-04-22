@@ -6,7 +6,7 @@ on:
 jobs:
   build-ipk:
     name: Build ARM64 OpenWrt IPK for Cortex-A53
-    runs-on: ubuntu-22.04-arm # Native ARM64 runner
+    runs-on: ubuntu-22.04
     container:
       image: alpine:latest
       options: --rm

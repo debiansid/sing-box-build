@@ -30,7 +30,7 @@ jobs:
         run: |
           # Download and install Go 1.22.x (adjust version as needed)
           GO_VERSION=1.24.2
-          curl -L -o go.tar.gz https://golang.org/dl/go${GO_VERSION}.linux-arm64.tar.gz
+          curl -L -o go.tar.gz https://golang.org/dl/go${GO_VERSION}.linux.tar.gz
           tar -C /usr/local -xzf go.tar.gz
           rm go.tar.gz
           # Set up environment

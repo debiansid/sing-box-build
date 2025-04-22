@@ -1,4 +1,4 @@
-name: Build sing-box core on Alpine Linux for arm64
+name: Build sing-box core 1.10.1  for arm64
 on:
   workflow_dispatch:
   schedule:
@@ -23,6 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
+          ref: main-rnetx
           
 
       - name: Get latest Go version
@@ -31,13 +32,10 @@ jobs:
           GO_VERSION=$(curl -s https://raw.githubusercontent.com/actions/go-versions/main/versions-manifest.json | grep -oE '"version": "[0-9]{1}.[0-9]{1,}(.[0-9]{1,})?"' | head -1 | cut -d':' -f2 | sed 's/ //g; s/"//g')
           echo "go_version=$GO_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Install specific Go version
-        run: |
-          apk del go
-          wget -q https://golang.org/dl/go${{ steps.go_version.outputs.go_version }}.linux-amd64.tar.gz
-          tar -C /usr/local -xzf go${{ steps.go_version.outputs.go_version }}.linux-amd64.tar.gz
-          ln -sf /usr/local/go/bin/go /usr/bin/go
-          go version
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ^1.23
 
       - name: Build core
         run: |

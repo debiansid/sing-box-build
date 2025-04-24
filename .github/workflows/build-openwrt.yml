@@ -1,4 +1,4 @@
-name: Build sing-box for arm64
+name: Build sing-box for openwrt
 on:
   workflow_dispatch:
   schedule:

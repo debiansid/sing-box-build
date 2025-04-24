@@ -11,7 +11,7 @@ jobs:
       image: alpine:latest
       options: --rm
     env:
-      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_outbound_provider
+      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_provider
     steps:
       - name: Install dependencies
         run: |
@@ -23,7 +23,6 @@ jobs:
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
-          ref: main-nekolsd
           
 
       - name: Get latest Go version

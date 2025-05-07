@@ -1,4 +1,4 @@
-name: Build main core from nekolsd
+name: Build main-nekolsd core from debiansid
 on:
   workflow_dispatch:
   schedule:
@@ -13,7 +13,8 @@ jobs:
       - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
-          repository: nekolsd/sing-box
+          repository: debiansid/sing-box
+          ref: main-nekolsd
       - name: delete tag
         run: |
          cd /home/runner/work/sing-box-build/sing-box-build

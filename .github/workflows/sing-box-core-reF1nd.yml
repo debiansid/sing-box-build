@@ -1,4 +1,4 @@
-name: Build core from reF1nd
+name: Build core from debiansid
 on:
   workflow_dispatch:
   schedule:
@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
-          repository: reF1nd/sing-box
-          ref: reF1nd-dev
+          repository: debiansid/sing-box
+          ref: dev-provider
           
       - name: delete tag
         run: |

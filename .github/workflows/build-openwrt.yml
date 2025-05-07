@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
-          
+          ref: main-nekolsd
 
       - name: Get latest Go version
         id: go_version

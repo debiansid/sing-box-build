@@ -1,4 +1,4 @@
-name: Build core from debiansid
+name: Build rnetx 1.11.0 core from debiansid
 on:
   workflow_dispatch:
   schedule:
@@ -14,7 +14,7 @@ jobs:
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
-          ref: dev-provider
+          ref: dev-next-rnetx
           
       - name: delete tag
         run: |

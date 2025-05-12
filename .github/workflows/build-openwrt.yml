@@ -1,4 +1,4 @@
-name: Build sing-box for openwrt
+name: Build sing-box 1.11.0 for openwrt
 on:
   workflow_dispatch:
   schedule:
@@ -11,7 +11,7 @@ jobs:
       image: alpine:latest
       options: --rm
     env:
-      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_provider
+      TAGS: with_quic,with_gvisor,with_utls,with_clash_api,with_outbound_provider
     steps:
       - name: Install dependencies
         run: |
@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           repository: debiansid/sing-box
-          ref: main-nekolsd
+          ref: dev-next-rnetx
 
       - name: Get latest Go version
         id: go_version
@@ -34,7 +34,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ^1.24
+          go-version: ^1.23
 
       - name: Build core
         run: |

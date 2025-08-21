@@ -1,4 +1,4 @@
-name: Build main-nekolsd core from debiansid
+name: Build reF1nd-dev core
 on:
   workflow_dispatch:
   schedule:
@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
-          repository: debiansid/sing-box
-          ref: main-nekolsd
+          repository: reF1nd/sing-box
+          ref: reF1nd-dev
       - name: delete tag
         run: |
          cd /home/runner/work/sing-box-build/sing-box-build
@@ -27,7 +27,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ^1.24
+          go-version: ^1.25
 
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
@@ -43,7 +43,7 @@ jobs:
         run: |
           git remote add sekai https://github.com/SagerNet/sing-box
           git fetch sekai
-          CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang
+          CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
           VERSION=$(CGO_ENABLED=0 go run ./cmd/internal/read_tag)
           CGO_ENABLED=1 CC=${CC} GOARCH=arm64 GOOS=android go build -v -trimpath -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags ${TAGS} ./cmd/sing-box
           CGO_ENABLED=0 GOARCH=amd64 GOOS=windows go build -v -trimpath -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' -s -w -buildid=" -tags ${TAGS} -o sing-box-cli.exe ./cmd/sing-box

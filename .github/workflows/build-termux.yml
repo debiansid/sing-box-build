@@ -67,9 +67,9 @@ jobs:
         with:
           name: termux-app-unsigned
 
-      - name: Sign ${{ matrix.abi }} APK
+      - name: Sign APK
         uses: r0adkll/sign-android-release@v1
-        id: sign_${{ matrix.abi }}
+        id: sign
         with:
           releaseDirectory: .
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
@@ -77,8 +77,8 @@ jobs:
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload signed ${{ matrix.abi }} APK
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
           name: termux-app-signed-${{ matrix.abi }}
-          path: ${{ steps.sign_${{ matrix.abi }}.outputs.signedReleaseFile }}
+          path: ./*-signed.apk

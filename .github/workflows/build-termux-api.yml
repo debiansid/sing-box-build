@@ -1,0 +1,72 @@
+name: Build Termux:API
+
+on:
+  workflow_dispatch:
+
+env:
+  BUILD_TOOLS_VERSION: "34.0.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build Termux:API
+
+    steps:
+      - name: Clone termux-api
+        uses: actions/checkout@v4
+        with:
+          repository: termux/termux-api
+          path: termux-api
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      # ---- 参照官方，设置版本号 ----
+      - name: Set version
+        id: version
+        run: |
+          CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
+          CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" termux-api/app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
+          RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+${GITHUB_SHA:0:7}"
+          APK_VERSION_TAG="$RELEASE_VERSION_NAME.github.release"
+          
+          echo "version_name=$RELEASE_VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "apk_version_tag=$APK_VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "Release 版本: $RELEASE_VERSION_NAME"
+
+      - name: Grant gradlew permission
+        run: chmod +x termux-api/gradlew
+
+      # ---- 照官方用 assembleRelease ----
+      - name: Build release APK
+        working-directory: termux-api
+        run: |
+          export TERMUX_API_APP__BUILD__APP_VERSION_NAME="${{ steps.version.outputs.version_name }}"
+          export TERMUX_API_APP__BUILD__APK_VERSION_TAG="${{ steps.version.outputs.apk_version_tag }}"
+          ./gradlew assembleRelease
+
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_api
+        with:
+          releaseDirectory: termux-api/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux-api-signed
+          path: ${{ steps.sign_api.outputs.signedReleaseFile }}

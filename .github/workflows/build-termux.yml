@@ -2,15 +2,6 @@ name: Build Termux App
 
 on:
   workflow_dispatch:
-    inputs:
-      bootstrap_version:
-        description: 'Bootstrap 版本 (例如 2024.09.27)，留空自动获取'
-        required: false
-        type: string
-        default: ''
-
-env:
-  BUILD_TOOLS_VERSION: "34.0.0"
 
 jobs:
   build:
@@ -30,11 +21,67 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platforms;android-34 build-tools;34.0.0'
+      - name: Set version
+        id: version
+        shell: bash
+        run: |
+          CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
+          CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" termux-app/app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
+          RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+${GITHUB_SHA:0:7}"
+          APK_VERSION_TAG="$RELEASE_VERSION_NAME-apt-android-7-github-release"
 
+          echo "version_name=$RELEASE_VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "apk_version_tag=$APK_VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "Release 版本: $RELEASE_VERSION_NAME"
+
+      - name: Grant gradlew permission
+        run: chmod +x termux-app/gradlew
+
+      - name: Build release APK
+        working-directory: termux-app
+        shell: bash
+        run: |
+          export TERMUX_APP_VERSION_NAME="${{ steps.version.outputs.version_name }}"
+          export TERMUX_APK_VERSION_TAG="${{ steps.version.outputs.apk_version_tag }}"
+          export TERMUX_PACKAGE_VARIANT="apt-android-7"
+          ./gradlew assembleRelease
+
+      - name: Upload unsigned APKs (all ABIs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux-app-unsigned
+          path: termux-app/app/build/outputs/apk/release/*.apk
+
+  sign:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Sign Termux App
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [universal, arm64-v8a, armeabi-v7a, x86_64, x86]
+
+    steps:
+      - name: Download unsigned APK
+        uses: actions/download-artifact@v4
+        with:
+          name: termux-app-unsigned
+
+      - name: Sign APK (${{ matrix.abi }})
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: .
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload signed APK (${{ matrix.abi }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: termux-app-signed-${{ matrix.abi }}
+          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
       # ---- 获取 bootstrap ----
       - name: Get bootstrap version
         id: bootstrap

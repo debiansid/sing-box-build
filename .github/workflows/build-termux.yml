@@ -55,21 +55,21 @@ jobs:
   sign:
     needs: build
     runs-on: ubuntu-latest
-    name: Sign Termux App
+    name: Sign ${{ matrix.abi }}
     strategy:
       fail-fast: false
       matrix:
         abi: [universal, arm64-v8a, armeabi-v7a, x86_64, x86]
 
     steps:
-      - name: Download unsigned APK
+      - name: Download unsigned APKs
         uses: actions/download-artifact@v4
         with:
           name: termux-app-unsigned
 
-      - name: Sign APK (${{ matrix.abi }})
+      - name: Sign ${{ matrix.abi }} APK
         uses: r0adkll/sign-android-release@v1
-        id: sign_app
+        id: sign_${{ matrix.abi }}
         with:
           releaseDirectory: .
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
@@ -77,83 +77,8 @@ jobs:
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload signed APK (${{ matrix.abi }})
+      - name: Upload signed ${{ matrix.abi }} APK
         uses: actions/upload-artifact@v4
         with:
           name: termux-app-signed-${{ matrix.abi }}
-          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
-      # ---- 获取 bootstrap ----
-      - name: Get bootstrap version
-        id: bootstrap
-        run: |
-          if [ -n "${{ inputs.bootstrap_version }}" ]; then
-            VER="${{ inputs.bootstrap_version }}"
-          else
-            # 从 termux-packages release 里自动取最新 bootstrap
-            VER=$(curl -sL https://api.github.com/repos/termux/termux-packages/releases \
-              | jq -r '.[].tag_name' \
-              | grep '^bootstrap-' \
-              | head -1 \
-              | sed 's/^bootstrap-//')
-            if [ -z "$VER" ]; then
-              echo "自动获取失败，使用 2024.09.27"
-              VER="2024.09.27"
-            fi
-          fi
-          echo "version=$VER" >> $GITHUB_OUTPUT
-          echo "Bootstrap 版本: $VER"
-
-      - name: Download bootstrap zips
-        run: |
-          VER="${{ steps.bootstrap.outputs.version }}"
-          BASE="https://github.com/termux/termux-packages/releases/download/bootstrap-${VER}"
-          DEST="termux-app/app/src/main/cpp"
-          mkdir -p "$DEST"
-          
-          for arch in aarch64 arm i686 x86_64; do
-            FILE="bootstrap-${arch}.zip"
-            echo "下载 $FILE ..."
-            curl -fSL "${BASE}/${FILE}" -o "${DEST}/${FILE}" || {
-              echo "下载 $FILE 失败"
-              exit 1
-            }
-          done
-          echo "下载完成："
-          ls -lh "$DEST"/bootstrap-*.zip
-
-      # ---- 构建 ----
-      - name: Set version
-        id: version
-        run: |
-          CURRENT_VERSION_NAME_REGEX='\s+versionName "([^"]+)"$'
-          CURRENT_VERSION_NAME="$(grep -m 1 -E "$CURRENT_VERSION_NAME_REGEX" termux-app/app/build.gradle | sed -r "s/$CURRENT_VERSION_NAME_REGEX/\1/")"
-          RELEASE_VERSION_NAME="v$CURRENT_VERSION_NAME+${GITHUB_SHA:0:7}"
-          echo "version_name=$RELEASE_VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "Release 版本名: $RELEASE_VERSION_NAME"
-
-      - name: Grant gradlew permission
-        run: chmod +x termux-app/gradlew
-
-      - name: Build release APK
-        working-directory: termux-app
-        run: |
-          export TERMUX_APP__BUILD__APP_VERSION_NAME="${{ steps.version.outputs.version_name }}"
-          ./gradlew assembleRelease
-
-      - name: Sign APK
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: termux-app/app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
-
-      - name: Upload signed APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: termux-app-signed
-          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          path: ${{ steps.sign_${{ matrix.abi }}.outputs.signedReleaseFile }}

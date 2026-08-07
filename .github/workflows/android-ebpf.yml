@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: MIT
-# Copyright (C) 2026 VIKINGYFY
 
 name: Build Android eBPF
 
@@ -80,6 +78,8 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: 1.25.12
+          cache-dependency-path: source/go.mod
+
 
       - name: Setup Android NDK
         id: setup-ndk

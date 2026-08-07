@@ -537,7 +537,7 @@ jobs:
           echo "VERSION=${{ needs.calculate_version.outputs.version }}" >> "$GITHUB_ENV"
       
       - name: Download builds
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8.0.1
         with:
           path: dist
           merge-multiple: true

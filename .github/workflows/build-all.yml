@@ -96,12 +96,13 @@ jobs:
           echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
+
   # ========================================================
-  # Job 1: 二进制与 Core 编译 (Linux, Android Core, Windows)
+  # Job 1: 所有目标统一矩阵编译 (Linux, Android Core, Windows, SFA)
   # ========================================================
   build:
     name: ${{ matrix.name }}
-    if: inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'Linux-package'
+    if: inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'SFA' || inputs.build == 'Linux-package'
     runs-on: ${{ matrix.runner }}
     needs:
       - calculate_version
@@ -111,6 +112,7 @@ jobs:
           - { name: "Linux amd64 (musl)", os: linux, arch: amd64, variant: musl, runner: ubuntu-latest, type: binary, debian: amd64 }
           - { name: "Android arm64 core", os: android, arch: arm64, runner: ubuntu-latest, type: android }
           - { name: "Windows amd64", os: windows, arch: amd64, runner: windows-latest, type: binary }
+          - { name: "SFA (sing-box for android)", os: android, arch: arm64, runner: ubuntu-latest, type: sfa }
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
@@ -125,6 +127,16 @@ jobs:
           path: source
           fetch-depth: 0
       
+      # SFA 专属：在计算 Gradle Cache 之前拉取 SFA 代码
+      - name: Checkout SFA Repository
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
+        uses: actions/checkout@v7
+        with:
+          repository: SagerNet/sing-box-for-android
+          ref: dev
+          path: SFA
+          submodules: recursive
+
       - name: Setup Go
         uses: actions/setup-go@v7.0.0
         with:
@@ -139,13 +151,14 @@ jobs:
           key: go-mod-linux-${{ hashFiles('source/go.sum') }}
           restore-keys: go-mod-linux-
       
+      # 优化：按 matrix.type 隔离 Go 编译缓存，避免 CGO 目标文件相互污染
       - name: Cache Go build cache (Linux)
         if: runner.os != 'Windows'
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-
+          key: go-build-tools-linux-${{ matrix.type }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-build-tools-linux-${{ matrix.type }}-
       
       - name: Cache Go modules (Windows)
         if: runner.os == 'Windows'
@@ -160,8 +173,8 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/AppData/Local/go-build
-          key: go-build-tools-windows-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-windows-
+          key: go-build-tools-windows-${{ matrix.type }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-build-tools-windows-${{ matrix.type }}-
       
       - name: Setup Android NDK
         if: matrix.os == 'android'
@@ -171,6 +184,25 @@ jobs:
           ndk-version: r29
           add-to-path: true
           local-cache: false
+
+      # 优化：改用官方 setup-java Action 秒级恢复预装的 OpenJDK 17
+      - name: Setup OpenJDK
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
+        uses: actions/setup-java@v5.7.0
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      # 优化：在 SFA 存在的情况下精准计算包装器 Hash
+      - name: Cache Gradle
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('SFA/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
 
       - name: Set tag (Linux/Android)
         if: runner.os != 'Windows'
@@ -185,25 +217,32 @@ jobs:
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$env:GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
+
       - name: Set build tags (Linux)
-        if: runner.os != 'Windows' && matrix.type != 'android'
+        if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
         run: |
           set -xeuo pipefail
           TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
       
-      - name: Set build tags (Android)
+      - name: Set build tags (Android Core)
         if: matrix.type == 'android'
         run: |
           set -xeuo pipefail
           TAGS='with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
+
+      - name: Set build tags (SFA)
+        if: matrix.type == 'sfa'
+        run: |-
+          echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
       
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
         run: |
           $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_tailscale,badlinkname,tfogo_checklinkname0"
           echo "BUILD_TAGS=$TAGS" >> $env:GITHUB_ENV
+
       # --- 1. Linux musl 编译 ---
       - name: Build (musl)
         if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
@@ -221,7 +260,7 @@ jobs:
           FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 2. Android Core 编译 (含 eBPF 支持与完整的 Commit Hash) ---
+      # --- 2. Android Core 编译 ---
       - name: Build Android core
         if: matrix.type == 'android' && (inputs.build == 'All' || inputs.build == 'Android')
         working-directory: source
@@ -263,6 +302,54 @@ jobs:
           GOARCH: amd64
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # --- 4. SFA App 编译 ---
+      - name: Build libbox.aar (SFA)
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
+        working-directory: source
+        run: |
+         mkdir -p ../SFA/app/libs/
+         make lib_install
+         FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
+         CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
+         
+         CGO_ENABLED=1 CC=${CC} gomobile bind -v \
+           -target android \
+           -androidapi 23 \
+           -javapkg=io.nekohasekai \
+           -libname=box \
+           -trimpath  \
+           -buildvcs=false \
+           -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
+           -tags "${BUILD_TAGS}" \
+           ./experimental/libbox
+    
+         cp libbox.aar ../SFA/app/libs/
+        env:
+         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      # 优化：移除了 `:app:clean` 开启真正的高效增量构建与 Task 缓存复用
+      - name: Build SFA APK
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
+        working-directory: SFA
+        run: |
+         sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
+         sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
+         chmod +x ./gradlew
+         ./gradlew --build-cache --parallel :app:assembleOtherRelease && ./gradlew --stop
+
+      - name: Sign SFA
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: SFA/app/build/outputs/apk/other/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
+
       - name: Set mtime (Linux)
         if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
         working-directory: source
@@ -303,7 +390,7 @@ jobs:
             release/config/sing-box.initd=/etc/init.d/sing-box
       
       - name: Set name (Linux/Android)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.type != 'sfa'
         run: |-
           DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
           if [[ "${{ matrix.variant }}" == "musl" ]]; then
@@ -318,7 +405,7 @@ jobs:
           echo "DIR_NAME=$DIR_NAME" >> $env:GITHUB_ENV
       
       - name: Archive (Linux/Android)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.type != 'sfa'
         working-directory: source/dist
         run: |
           set -xeuo pipefail
@@ -356,7 +443,7 @@ jobs:
           Pop-Location
       
       - name: Cleanup (Linux/Android)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.type != 'sfa'
         working-directory: source
         run: rm dist/sing-box
       
@@ -402,148 +489,15 @@ jobs:
           name: package-deb-${{ matrix.debian }}
           path: "source/dist/*.deb"
 
-  # ========================================================
-  # Job 2: SFA App 独立编译 (手工选择 SFA 时启动)
-  # ========================================================
-  build_sfa:
-    name: SFA (sing-box for android)
-    if: inputs.build == 'SFA'
-    runs-on: ubuntu-latest
-    needs:
-      - calculate_version
-    steps:
-      - name: Checkout builder repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-        with:
-          fetch-depth: 0
-      
-      - name: Checkout source repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-        with:
-          repository: ${{ inputs.source_repo }}
-          ref: ${{ inputs.source_ref }}
-          path: source
-          fetch-depth: 0
-
-      - name: Checkout SFA Repository
-        uses: actions/checkout@v7
-        with:
-          repository: SagerNet/sing-box-for-android
-          ref: dev
-          path: SFA
-          submodules: recursive
-      
-      - name: Setup Go
-        uses: actions/setup-go@v6.4.0
-        with:
-          go-version: 1.25.12
-          cache: false
-      
-      - name: Cache Go modules
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-mod-linux-
-      
-      - name: Cache Go build cache
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-
-      
-      - name: Setup Android NDK
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r29
-          add-to-path: true
-          local-cache: false
-      
-      - name: Cache Android NDK
-        uses: actions/cache@v6.1.0
-        with:
-          path: ${{ steps.setup-ndk.outputs.ndk-path }}
-          key: android-ndk-r29-${{ runner.os }}
-          restore-keys: android-ndk-r29-
-
-      - name: Setup OpenJDK
-        run: |-
-          sudo apt update && sudo apt install -y openjdk-17-jdk-headless
-          /usr/lib/jvm/java-17-openjdk-amd64/bin/java --version
-      
-      - name: Cache Gradle
-        uses: actions/cache@v6.1.0
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('SFA/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-
-      - name: Set tag
-        working-directory: source
-        run: |-
-          git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
-          git tag v${{ needs.calculate_version.outputs.version }} -f
-
-      - name: Set build tags (SFA)
-        run: |-
-          echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
-
-      - name: Build libbox.aar
-        working-directory: source
-        run: |
-         mkdir -p ../SFA/app/libs/
-         make lib_install
-         FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
-         CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
-         
-         CGO_ENABLED=1 CC=${CC} gomobile bind -v \
-           -target android \
-           -androidapi 23 \
-           -javapkg=io.nekohasekai \
-           -libname=box \
-           -trimpath  \
-           -buildvcs=false \
-           -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
-           -tags "${BUILD_TAGS}" \
-           ./experimental/libbox
-    
-         cp libbox.aar ../SFA/app/libs/
-        env:
-         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-         JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-
-      - name: Build SFA APK
-        working-directory: SFA
-        run: |
-         sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
-         sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
-         chmod +x ./gradlew
-         ./gradlew :app:clean :app:assembleOtherRelease && ./gradlew --stop
-
-      - name: Sign SFA
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: SFA/app/build/outputs/apk/other/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "34.0.0"
-
       - name: Upload artifact (SFA)
+        if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: SFA-${{ needs.calculate_version.outputs.version }}
           path: SFA/app/build/outputs/apk/other/release/*arm64-v8a-unsigned-signed.apk
 
   # ========================================================
-  # Job 3: 发布上传
+  # Job 2: 发布上传
   # ========================================================
   upload:
     name: Upload builds
@@ -554,7 +508,6 @@ jobs:
     needs:
       - calculate_version
       - build
-      - build_sfa
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5

@@ -155,8 +155,8 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-
+          key: go-build-tools-linux-${{ matrix.type }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-build-tools-linux-${{ matrix.type }}-
       
       - name: Cache Go modules (Windows)
         if: runner.os == 'Windows'

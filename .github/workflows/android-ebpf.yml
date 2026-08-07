@@ -41,7 +41,7 @@ jobs:
         id: outputs
         working-directory: source
         run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/${{ inputs.source_repo }}/tags | jq -r '.[0].name')
+          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/tags | jq -r '.[0].name')
           if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           fi

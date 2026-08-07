@@ -1,4 +1,4 @@
-name: Build sing-box 
+name: Build
 
 on:
   workflow_dispatch:
@@ -27,12 +27,12 @@ on:
         description: "Source repository (owner/repo)"
         required: false
         type: string
-        default: "debiansid/sing-box"
+        default: "sagernet/sing-box"
       source_ref:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-provider"
+        default: "main"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.build }}
@@ -333,23 +333,30 @@ jobs:
       
       - name: Archive (Windows)
         if: runner.os == 'Windows'
-        working-directory: source/dist
+        working-directory: source
         run: |
-          cd dist
           # Archive GUI version
-          mkdir "$env:DIR_NAME"
-          Copy-Item ../LICENSE "$env:DIR_NAME"
-          Copy-Item sing-box.exe "$env:DIR_NAME"
-          Compress-Archive -Path "$env:DIR_NAME" -DestinationPath "$env:DIR_NAME.zip"
-          Remove-Item -Recurse "$env:DIR_NAME"
+          $distDir = "dist"
+          $guiDir = "${env:DIR_NAME}"
+          $guiPath = Join-Path $distDir $guiDir
+          New-Item -ItemType Directory -Force -Path $guiPath | Out-Null
+          Copy-Item LICENSE $guiPath
+          Copy-Item "dist/sing-box.exe" $guiPath
+          Push-Location $distDir
+          Compress-Archive -Path $guiDir -DestinationPath "${guiDir}.zip" -Force
+          Remove-Item -Recurse -Force $guiDir
+          Pop-Location
           
           # Archive CLI version
-          $CLI_DIR_NAME = "$env:DIR_NAME-cli"
-          mkdir "$CLI_DIR_NAME"
-          Copy-Item ../LICENSE "$CLI_DIR_NAME"
-          Copy-Item sing-box-cli.exe "$CLI_DIR_NAME"
-          Compress-Archive -Path "$CLI_DIR_NAME" -DestinationPath "$CLI_DIR_NAME.zip"
-          Remove-Item -Recurse "$CLI_DIR_NAME"
+          $cliDir = "${env:DIR_NAME}-cli"
+          $cliPath = Join-Path $distDir $cliDir
+          New-Item -ItemType Directory -Force -Path $cliPath | Out-Null
+          Copy-Item LICENSE $cliPath
+          Copy-Item "dist/sing-box-cli.exe" $cliPath
+          Push-Location $distDir
+          Compress-Archive -Path $cliDir -DestinationPath "${cliDir}.zip" -Force
+          Remove-Item -Recurse -Force $cliDir
+          Pop-Location
       
       - name: Cleanup (Linux/Android)
         if: runner.os != 'Windows'

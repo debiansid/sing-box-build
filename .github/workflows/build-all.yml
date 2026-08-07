@@ -23,16 +23,6 @@ on:
         required: false
         type: boolean
         default: false
-      source_repo:
-        description: "Source repository (owner/repo)"
-        required: false
-        type: string
-        default: "debiansid/sing-box"
-      source_ref:
-        description: "Source branch/tag/commit"
-        required: false
-        type: string
-        default: "testing-provider"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.build }}
@@ -46,52 +36,20 @@ jobs:
       version: ${{ steps.outputs.outputs.version }}
       git_hash: ${{ steps.outputs.outputs.git_hash }}
       full_version: ${{ steps.outputs.outputs.full_version }}
-      source_git_hash: ${{ steps.source_info.outputs.git_hash }}
     steps:
-      - name: Checkout builder repo
+      - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0
-      
-      - name: Checkout source repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-        with:
-          repository: ${{ inputs.source_repo }}
-          ref: ${{ inputs.source_ref }}
-          path: source
-          fetch-depth: 0
-      
       - name: Setup Go
         uses: actions/setup-go@v6.4.0
         with:
-          go-version: 1.25.12
-          cache: false
-      
-      - name: Cache Go modules
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-mod-linux-
-      
-      - name: Cache Go build cache
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-
-      
-      - name: Get source git hash
-        id: source_info
-        working-directory: source
-        run: |-
-          GIT_HASH=$(git rev-parse --short HEAD)
-          echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
+          go-version: ^1.25.8
       
       - name: Set outputs
         id: outputs
         run: |-
-          GIT_HASH="${{ steps.source_info.outputs.git_hash }}"
+          GIT_HASH=$(git rev-parse --short HEAD)
           FULL_VER="${{ inputs.version }}-${GIT_HASH}"
           echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
@@ -113,57 +71,14 @@ jobs:
           - { name: "Android arm64 core", os: android, arch: arm64, runner: ubuntu-latest, type: android }
           - { name: "Windows amd64", os: windows, arch: amd64, runner: windows-latest, type: binary }
     steps:
-      - name: Checkout builder repo
+      - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0
-      
-      - name: Checkout source repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-        with:
-          repository: ${{ inputs.source_repo }}
-          ref: ${{ inputs.source_ref }}
-          path: source
-          fetch-depth: 0
-      
       - name: Setup Go
         uses: actions/setup-go@v7.0.0
         with:
-          go-version: 1.25.12
-          cache: false
-      
-      - name: Cache Go modules (Linux)
-        if: runner.os != 'Windows'
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-mod-linux-
-      
-      - name: Cache Go build cache (Linux)
-        if: runner.os != 'Windows'
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-
-      
-      - name: Cache Go modules (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-windows-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-mod-windows-
-      
-      - name: Cache Go build cache (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/AppData/Local/go-build
-          key: go-build-tools-windows-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-windows-
-      
+          go-version: ^1.26
       - name: Setup Android NDK
         if: matrix.os == 'android'
         id: setup-ndk
@@ -175,14 +90,11 @@ jobs:
 
       - name: Set tag (Linux/Android)
         if: runner.os != 'Windows'
-        working-directory: source
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
-      
       - name: Set tag (Windows)
         if: runner.os == 'Windows'
-        working-directory: source
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$env:GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
@@ -193,14 +105,12 @@ jobs:
           set -xeuo pipefail
           TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
-      
       - name: Set build tags (Android)
         if: matrix.type == 'android'
         run: |
           set -xeuo pipefail
           TAGS='with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
-      
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -210,7 +120,6 @@ jobs:
       # --- 1. Linux musl 编译 ---
       - name: Build (musl)
         if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
-        working-directory: source
         run: |
           set -xeuo pipefail
           mkdir -p dist
@@ -227,7 +136,6 @@ jobs:
       # --- 2. Android Core 编译 (含 eBPF 支持与完整的 Commit Hash) ---
       - name: Build Android core
         if: matrix.type == 'android' && (inputs.build == 'All' || inputs.build == 'Android')
-        working-directory: source
         run: |
           set -xeuo pipefail
           mkdir -p dist
@@ -248,7 +156,6 @@ jobs:
       # --- 3. Windows 编译 ---
       - name: Build Windows
         if: matrix.os == 'windows' && (inputs.build == 'All' || inputs.build == 'Binary')
-        working-directory: source
         run: |
           mkdir -p dist
           $FULL_VER = "${{ needs.calculate_version.outputs.full_version }}"
@@ -268,25 +175,20 @@ jobs:
 
       - name: Set mtime (Linux)
         if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
-        working-directory: source
         run: |-
           TZ=UTC touch -t '197001010000' dist/sing-box
-      
       - name: Set package version (Linux)
         if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
         run: |-
           PKG_VERSION="${{ needs.calculate_version.outputs.version }}"
           PKG_VERSION="${PKG_VERSION//-/\~}"
           echo "PKG_VERSION=${PKG_VERSION}" >> "${GITHUB_ENV}"
-      
       - name: Set package name (DEB)
         if: matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Linux-package')
         run: |-
           echo "NAME=sing-box" >> "$GITHUB_ENV"
-      
       - name: Package DEB
         if: matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Linux-package')
-        working-directory: source
         run: |
           set -xeuo pipefail
           sudo gem install fpm
@@ -304,7 +206,6 @@ jobs:
             release/config/sing-box@.service=/usr/lib/systemd/system/sing-box@.service \
             release/config/sing-box.sysusers=/usr/lib/sysusers.d/sing-box.conf \
             release/config/sing-box.initd=/etc/init.d/sing-box
-      
       - name: Set name (Linux/Android)
         if: runner.os != 'Windows'
         run: |-
@@ -313,101 +214,84 @@ jobs:
             DIR_NAME="${DIR_NAME}-musl"
           fi
           echo "DIR_NAME=${DIR_NAME}" >> "${GITHUB_ENV}"
-      
       - name: Set name (Windows)
         if: runner.os == 'Windows'
         run: |-
           $DIR_NAME = "sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
           echo "DIR_NAME=$DIR_NAME" >> $env:GITHUB_ENV
-      
       - name: Archive (Linux/Android)
         if: runner.os != 'Windows'
-        working-directory: source/dist
         run: |
           set -xeuo pipefail
+          cd dist
           mkdir -p "${DIR_NAME}"
           cp ../LICENSE "${DIR_NAME}"
           cp sing-box "${DIR_NAME}"
           tar -czvf "${DIR_NAME}.tar.gz" "${DIR_NAME}"
           rm -r "${DIR_NAME}"
-      
       - name: Archive (Windows)
         if: runner.os == 'Windows'
-        working-directory: source
         run: |
+          cd dist
           # Archive GUI version
-          $distDir = "dist"
-          $guiDir = "${env:DIR_NAME}"
-          $guiPath = Join-Path $distDir $guiDir
-          New-Item -ItemType Directory -Force -Path $guiPath | Out-Null
-          Copy-Item LICENSE $guiPath
-          Copy-Item "dist/sing-box.exe" $guiPath
-          Push-Location $distDir
-          Compress-Archive -Path $guiDir -DestinationPath "${guiDir}.zip" -Force
-          Remove-Item -Recurse -Force $guiDir
-          Pop-Location
+          mkdir "$env:DIR_NAME"
+          Copy-Item ../LICENSE "$env:DIR_NAME"
+          Copy-Item sing-box.exe "$env:DIR_NAME"
+          Compress-Archive -Path "$env:DIR_NAME" -DestinationPath "$env:DIR_NAME.zip"
+          Remove-Item -Recurse "$env:DIR_NAME"
           
           # Archive CLI version
-          $cliDir = "${env:DIR_NAME}-cli"
-          $cliPath = Join-Path $distDir $cliDir
-          New-Item -ItemType Directory -Force -Path $cliPath | Out-Null
-          Copy-Item LICENSE $cliPath
-          Copy-Item "dist/sing-box-cli.exe" $cliPath
-          Push-Location $distDir
-          Compress-Archive -Path $cliDir -DestinationPath "${cliDir}.zip" -Force
-          Remove-Item -Recurse -Force $cliDir
-          Pop-Location
-      
+          $CLI_DIR_NAME = "$env:DIR_NAME-cli"
+          mkdir "$CLI_DIR_NAME"
+          Copy-Item ../LICENSE "$CLI_DIR_NAME"
+          Copy-Item sing-box-cli.exe "$CLI_DIR_NAME"
+          Compress-Archive -Path "$CLI_DIR_NAME" -DestinationPath "$CLI_DIR_NAME.zip"
+          Remove-Item -Recurse "$CLI_DIR_NAME"
       - name: Cleanup (Linux/Android)
         if: runner.os != 'Windows'
-        working-directory: source
         run: rm dist/sing-box
-      
       - name: Cleanup (Windows)
         if: runner.os == 'Windows'
-        working-directory: source
         run: Remove-Item dist/sing-box.exe, dist/sing-box-cli.exe
-      
       - name: Upload artifact (Binary/Android core)
         if: (matrix.type == 'binary' || matrix.type == 'android') && matrix.debian == '' && runner.os != 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) }}
-          path: source/dist
-      
+          path: "dist"
       - name: Upload artifact (Binary with DEB)
         if: (matrix.type == 'binary' || matrix.type == 'android') && matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) }}
           path: |
-            source/dist/*.tar.gz
-            source/dist/*.zip
-      
+            dist/*.tar.gz
+            dist/*.zip
       - name: Upload artifact (Windows GUI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}
-          path: "source/dist/*[!-cli].zip"
-      
+          path: "dist/*[!-cli].zip"
       - name: Upload artifact (Windows CLI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}-cli
-          path: "source/dist/*-cli.zip"
-      
+          path: "dist/*-cli.zip"
       - name: Upload artifact (DEB package)
         if: matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Linux-package')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: package-deb-${{ matrix.debian }}
-          path: "source/dist/*.deb"
+          path: "dist/*.deb"
 
+  # ========================================================
+  # Job 2: SFA App 独立编译 (手工选择 SFA 时启动)
+  # ========================================================
   build_sfa:
     name: SFA (sing-box for android)
-    if: inputs.build == 'All' || inputs.build == 'SFA'
+    if: inputs.build == 'SFA'
     runs-on: ubuntu-latest
     needs:
       - calculate_version
@@ -420,8 +304,8 @@ jobs:
       - name: Checkout source repo (sing-box)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          repository: ${{ inputs.source_repo }}
-          ref: ${{ inputs.source_ref }}
+          repository: debiansid/sing-box
+          ref: testing-provider
           path: source
           fetch-depth: 0
       
@@ -430,20 +314,6 @@ jobs:
         with:
           go-version: ^1.26
       
-      - name: Cache Go modules
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-mod-linux-
-      
-      - name: Cache Go build cache
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-
-      
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -451,28 +321,12 @@ jobs:
           ndk-version: r29
           add-to-path: true
           local-cache: false
-      
-      - name: Cache Android NDK
-        uses: actions/cache@v6.1.0
-        with:
-          path: ${{ steps.setup-ndk.outputs.ndk-path }}
-          key: android-ndk-r29-${{ runner.os }}
-          restore-keys: android-ndk-r29-
 
       - name: Setup OpenJDK
         run: |-
           sudo apt update && sudo apt install -y openjdk-17-jdk-headless
           /usr/lib/jvm/java-17-openjdk-amd64/bin/java --version
-      
-      - name: Cache Gradle
-        uses: actions/cache@v6.1.0
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('SFA/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-      
+          
       - name: Checkout SFA Repository
         uses: actions/checkout@v7
         with:
@@ -492,76 +346,33 @@ jobs:
           echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
 
       - name: Build SFA (sing-box for android app)
+        working-directory: source
         run: |
-          # =============================================
-          # 步骤 1: 构建 libbox (在 source 目录)
-          # =============================================
-          cd source
-          FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
-          CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-          
-          echo "=========================================="
-          echo "Building libbox version: ${FULL_VER}"
-          echo "=========================================="
-          
-          # 创建 SFA 的 libs 目录
           mkdir -p ../SFA/app/libs/
+          make lib_install
+          FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
+          CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
           
-          # 构建 libbox
           CGO_ENABLED=1 CC=${CC} gomobile bind -v \
-            -target android \
-            -androidapi 23 \
-            -javapkg=io.nekohasekai \
-            -libname=box \
-            -trimpath \
-            -buildvcs=false \
-            -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
-            -tags "${BUILD_TAGS}" \
-            ./experimental/libbox
-          
-          # 检查 libbox.aar 是否生成
-          if [ ! -f libbox.aar ]; then
-            echo "ERROR: libbox.aar was not created!"
-            exit 1
-          fi
-          
-          # 复制到 SFA
+          -target android \
+          -androidapi 23 \
+          -javapkg=io.nekohasekai \
+          -libname=box \
+          -trimpath  \
+          -buildvcs=false \
+          -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
+          -tags "${BUILD_TAGS}" \
+          ./experimental/libbox
+      
           cp libbox.aar ../SFA/app/libs/
-          echo "libbox.aar copied to SFA/app/libs/"
-          
-          # =============================================
-          # 步骤 2: 构建 SFA App (在 SFA 目录)
-          # =============================================
           cd ../SFA
-          
-          echo "=========================================="
-          echo "Building SFA App"
-          echo "=========================================="
-          
-          # 确保在 dev 分支并拉取最新代码
+          git fetch origin dev
           git checkout dev
           git pull origin dev
-          
-          # 移除 signingConfigs (避免签名冲突)
           sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
           sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
-          
-          # 给 gradlew 执行权限
           chmod +x ./gradlew
-          
-          # 构建 SFA
-          ./gradlew :app:clean :app:assembleOtherRelease --stacktrace
-          
-          # 停止 Gradle daemon
-          ./gradlew --stop
-          
-          echo "=========================================="
-          echo "SFA build completed successfully!"
-          echo "=========================================="
-          
-          # 列出生成的 APK
-          ls -la app/build/outputs/apk/other/release/ || echo "APK directory not found"
-          
+          ./gradlew :app:clean :app:assembleOtherRelease && ./gradlew --stop
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
@@ -598,19 +409,17 @@ jobs:
       - build
       - build_sfa
     steps:
-      - name: Checkout builder repo
+      - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0
-      
       - name: Cache ghr
-        uses: actions/cache@v6.1.0
+        uses: actions/cache@v4
         id: cache-ghr
         with:
           path: |
             ~/go/bin/ghr
           key: ghr
-      
       - name: Setup ghr
         if: steps.cache-ghr.outputs.cache-hit != 'true'
         run: |-
@@ -618,19 +427,16 @@ jobs:
           git clone https://github.com/nekohasekai/ghr ghr
           cd ghr
           go install -v .
-      
       - name: Set tag
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
           echo "VERSION=${{ needs.calculate_version.outputs.version }}" >> "$GITHUB_ENV"
-      
       - name: Download builds
         uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
-      
       - name: Upload builds
         if: ${{ env.PUBLISHED == 'false' }}
         run: |-

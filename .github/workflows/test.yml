@@ -188,7 +188,7 @@ jobs:
       # 优化：改用官方 setup-java Action 秒级恢复预装的 OpenJDK 17
       - name: Setup OpenJDK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5.7.0
         with:
           distribution: 'temurin'
           java-version: '17'

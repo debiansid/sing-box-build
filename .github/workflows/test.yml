@@ -1,4 +1,4 @@
-name: Build All
+name: Build
 
 on:
   workflow_dispatch:
@@ -127,6 +127,7 @@ jobs:
           path: source
           fetch-depth: 0
       
+      # SFA 专属：在计算 Gradle Cache 之前拉取 SFA 代码
       - name: Checkout SFA Repository
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/checkout@v7
@@ -150,6 +151,7 @@ jobs:
           key: go-mod-linux-${{ hashFiles('source/go.sum') }}
           restore-keys: go-mod-linux-
       
+      # 优化：按 matrix.type 隔离 Go 编译缓存，避免 CGO 目标文件相互污染
       - name: Cache Go build cache (Linux)
         if: runner.os != 'Windows'
         uses: actions/cache@v6.1.0
@@ -171,8 +173,8 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/AppData/Local/go-build
-          key: go-build-tools-windows-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-windows-
+          key: go-build-tools-windows-${{ matrix.type }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-build-tools-windows-${{ matrix.type }}-
       
       - name: Setup Android NDK
         if: matrix.os == 'android'
@@ -189,6 +191,7 @@ jobs:
           sudo apt update && sudo apt install -y openjdk-17-jdk-headless
           /usr/lib/jvm/java-17-openjdk-amd64/bin/java --version
       
+      # 优化：在 SFA 存在的情况下精准计算包装器 Hash
       - name: Cache Gradle
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/cache@v6.1.0
@@ -330,7 +333,7 @@ jobs:
          sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
          sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
          chmod +x ./gradlew
-         ./gradlew :app:clean :app:assembleOtherRelease && ./gradlew --stop
+         ./gradlew --build-cache --parallel :app:clean :app:assembleOtherRelease && ./gradlew --stop
 
       - name: Sign SFA
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')

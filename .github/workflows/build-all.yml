@@ -406,11 +406,10 @@ jobs:
           path: "source/dist/*.deb"
 
   # ========================================================
-  # Job 2: SFA App 独立编译 (手工选择 SFA 时启动)
+  # Job 2: SFA App 独立编译 (无条件编译)
   # ========================================================
   build_sfa:
     name: SFA (sing-box for android)
-    if: inputs.build == 'SFA'
     runs-on: ubuntu-latest
     needs:
       - calculate_version

@@ -27,12 +27,12 @@ on:
         description: "Source repository (owner/repo)"
         required: false
         type: string
-        default: "sagernet/sing-box"
+        default: "debiansid/sing-box"
       source_ref:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "main"
+        default: "testing-provider"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.build }}

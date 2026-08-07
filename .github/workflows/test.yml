@@ -185,11 +185,13 @@ jobs:
           add-to-path: true
           local-cache: false
 
+      # 优化：改用官方 setup-java Action 秒级恢复预装的 OpenJDK 17
       - name: Setup OpenJDK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        run: |-
-          sudo apt update && sudo apt install -y openjdk-17-jdk-headless
-          /usr/lib/jvm/java-17-openjdk-amd64/bin/java --version
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
       
       # 优化：在 SFA 存在的情况下精准计算包装器 Hash
       - name: Cache Gradle
@@ -324,8 +326,8 @@ jobs:
          cp libbox.aar ../SFA/app/libs/
         env:
          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-         JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
 
+      # 优化：移除了 `:app:clean` 开启真正的高效增量构建与 Task 缓存复用
       - name: Build SFA APK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         working-directory: SFA
@@ -333,7 +335,7 @@ jobs:
          sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
          sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
          chmod +x ./gradlew
-         ./gradlew --build-cache --parallel :app:clean :app:assembleOtherRelease && ./gradlew --stop
+         ./gradlew --build-cache --parallel :app:assembleOtherRelease && ./gradlew --stop
 
       - name: Sign SFA
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')

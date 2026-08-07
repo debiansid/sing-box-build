@@ -406,10 +406,11 @@ jobs:
           path: "source/dist/*.deb"
 
   # ========================================================
-  # Job 2: SFA App 独立编译 (无条件编译)
+  # Job 2: SFA App 独立编译 (修复版本)
   # ========================================================
   build_sfa:
     name: SFA (sing-box for android)
+    if: inputs.build == 'All' || inputs.build == 'SFA'
     runs-on: ubuntu-latest
     needs:
       - calculate_version
@@ -419,7 +420,7 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Checkout source repo
+      - name: Checkout source repo (sing-box)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           repository: ${{ inputs.source_repo }}
@@ -494,43 +495,84 @@ jobs:
         run: |-
           echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
 
-      - name: Build SFA (sing-box for android app)
-        working-directory: source
+      - name: Build libbox and SFA App
         run: |
-         mkdir -p SFA/app/libs/
-         make lib_install
-         FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
-         CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
-         
-         CGO_ENABLED=1 CC=${CC} gomobile bind -v \
-         -target android \
-         -androidapi 23 \
-         -javapkg=io.nekohasekai \
-         -libname=box \
-         -trimpath  \
-         -buildvcs=false \
-         -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
-         -tags "${BUILD_TAGS}" \
-         ./experimental/libbox
-    
-         cp libbox.aar SFA/app/libs/
-         cd SFA
-         git fetch origin dev
-         git checkout dev
-         git pull origin dev
-         sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
-         sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
-         chmod +x ./gradlew
-         ./gradlew :app:clean :app:assembleOtherRelease && ./gradlew --stop
+          # =============================================
+          # 步骤 1: 构建 libbox (在 source 目录)
+          # =============================================
+          cd source
+          FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
+          CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          
+          echo "=========================================="
+          echo "Building libbox version: ${FULL_VER}"
+          echo "=========================================="
+          
+          # 构建 libbox
+          CGO_ENABLED=1 CC=${CC} gomobile bind -v \
+            -target android \
+            -androidapi 23 \
+            -javapkg=io.nekohasekai \
+            -libname=box \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
+            -tags "${BUILD_TAGS}" \
+            ./experimental/libbox
+          
+          # 检查 libbox.aar 是否生成
+          if [ ! -f libbox.aar ]; then
+            echo "ERROR: libbox.aar was not created!"
+            exit 1
+          fi
+          
+          # 复制到 SFA
+          mkdir -p ../SFA/app/libs/
+          cp libbox.aar ../SFA/app/libs/
+          echo "libbox.aar copied to SFA/app/libs/"
+          
+          # =============================================
+          # 步骤 2: 构建 SFA App (在 SFA 目录)
+          # =============================================
+          cd ../SFA
+          
+          echo "=========================================="
+          echo "Building SFA App"
+          echo "=========================================="
+          
+          # 确保在 dev 分支并拉取最新代码
+          git checkout dev
+          git pull origin dev
+          
+          # 移除 signingConfigs (避免签名冲突)
+          sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
+          sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
+          
+          # 给 gradlew 执行权限
+          chmod +x ./gradlew
+          
+          # 构建 SFA
+          ./gradlew :app:clean :app:assembleOtherRelease --stacktrace
+          
+          # 停止 Gradle daemon
+          ./gradlew --stop
+          
+          echo "=========================================="
+          echo "SFA build completed successfully!"
+          echo "=========================================="
+          
+          # 列出生成的 APK
+          ls -la app/build/outputs/apk/other/release/ || echo "APK directory not found"
+          
         env:
-         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-         JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
 
       - name: Sign SFA
         uses: r0adkll/sign-android-release@v1
         id: sign_app
         with:
-          releaseDirectory: source/SFA/app/build/outputs/apk/other/release
+          releaseDirectory: SFA/app/build/outputs/apk/other/release
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
           alias: ${{ secrets.ALIAS }}
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
@@ -542,7 +584,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.0
         with:
           name: SFA-${{ needs.calculate_version.outputs.version }}
-          path: source/SFA/app/build/outputs/apk/other/release/*arm64-v8a-unsigned-signed.apk
+          path: SFA/app/build/outputs/apk/other/release/*arm64-v8a-unsigned-signed.apk
 
   # ========================================================
   # Job 3: 发布上传

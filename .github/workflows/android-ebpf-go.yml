@@ -1,0 +1,107 @@
+
+name: Build Android eBPF go
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "Source repository (owner/repo)"
+        required: false
+        type: string
+        default: "debiansid/sing-box"
+      source_ref:
+        description: "Source branch/tag/commit"
+        required: false
+        type: string
+        default: "ebpf-go"
+
+jobs:
+  calculate_version:
+    name: Calculate version
+    runs-on: ubuntu-latest
+    outputs:
+      full_version: ${{ steps.outputs.outputs.full_version }}
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout source repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+      
+      - name: Get version
+        id: outputs
+        working-directory: source
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/tags | jq -r '.[0].name')
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          fi
+          LATEST_TAG=${LATEST_TAG#v}
+          GIT_HASH=$(git rev-parse --short HEAD)
+          FULL_VER="${LATEST_TAG}-${GIT_HASH}"
+          echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
+
+  build:
+    runs-on: ubuntu-24.04
+    needs:
+      - calculate_version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: arm64
+            compiler: aarch64-linux-android35-clang
+    env:
+      TAGS: with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout source repo
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: source/go.mod
+
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+
+      - name: Build
+        working-directory: source
+        env:
+          CGO_ENABLED: "1"
+          GOOS: android
+          GOARCH: ${{ matrix.goarch }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          CC: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.compiler }}
+          BPF_CLANG: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
+          FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
+        run: |
+          make build VERSION="${FULL_VER}"
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: sing-box-android-arm64-with-ebpf
+          path: source/sing-box

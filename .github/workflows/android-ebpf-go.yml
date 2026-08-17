@@ -1,5 +1,5 @@
 
-name: Build Android eBPF Google VPN
+name: Build Android eBPF VPN
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-ebpf-googlevpn"
+        default: "testing-ebpf"
 
 jobs:
   calculate_version:

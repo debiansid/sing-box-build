@@ -13,7 +13,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-ebpf-googlevpn"
+        default: "testing-ebpf-e5"
 
 jobs:
   calculate_version:

@@ -86,7 +86,16 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r29
-
+      
+      - name: Generate eBPF objects
+        working-directory: source
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          BPF_CLANG: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
+        run: |
+          make ebpf_generate
+          make ebpf_check
+          
       - name: Build
         working-directory: source
         env:

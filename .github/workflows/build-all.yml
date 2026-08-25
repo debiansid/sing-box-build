@@ -32,7 +32,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-ebpf-vpn-dev"
+        default: "testing-ebpf-vpn"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.build }}

@@ -114,5 +114,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: sing-box-android-arm64-with-ebpf-${{ needs.calculate_version.outputs.short_commit }}
+          name: sing-box-android-arm64-with-ebpf-dev-${{ needs.calculate_version.outputs.short_commit }}
           path: source/sing-box

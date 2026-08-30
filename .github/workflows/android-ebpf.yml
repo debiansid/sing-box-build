@@ -13,7 +13,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-ebpf-tc-vpn-fev"
+        default: "testing-ebpf-tc-vpn-dev"
 
 jobs:
   calculate_version:

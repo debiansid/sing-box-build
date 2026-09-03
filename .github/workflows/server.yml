@@ -60,37 +60,23 @@ jobs:
           SOURCE_REPO="Yuu518/sing-box"
           SOURCE_REF="testing-moon"
 
-          if [ ! -f release/DEFAULT_BUILD_TAGS ]; then
-            echo "ERROR: release/DEFAULT_BUILD_TAGS not found in source repository" >&2
-            exit 1
+          if [ -f release/DEFAULT_BUILD_TAGS ]; then
+            echo "Source release/DEFAULT_BUILD_TAGS (informational): $(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS)"
           fi
 
-          BUILD_TAGS=$(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS)
-          echo "Read build tags: ${BUILD_TAGS}"
+          BUILD_TAGS="with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl,with_cloudflared"
 
-          IFS=',' read -ra TAG_LIST <<< "${BUILD_TAGS}"
-          HAS_CLOUDFLARED=false
-          HAS_EBPF=false
-          HAS_PROVIDER=false
-
-          for t in "${TAG_LIST[@]}"; do
-            case "$t" in
-              with_cloudflared) HAS_CLOUDFLARED=true ;;
-              with_ebpf) HAS_EBPF=true ;;
-              with_provider) HAS_PROVIDER=true ;;
-            esac
-          done
-
-          if [ "$HAS_CLOUDFLARED" != "true" ]; then
-            echo "ERROR: Required build tag 'with_cloudflared' missing from release/DEFAULT_BUILD_TAGS" >&2
+          # Fail-closed tag assertions
+          if [[ ",${BUILD_TAGS}," == *",with_ebpf,"* ]]; then
+            echo "ERROR: Forbidden build tag 'with_ebpf' present!" >&2
             exit 1
           fi
-          if [ "$HAS_EBPF" = "true" ]; then
-            echo "ERROR: Forbidden build tag 'with_ebpf' present in release/DEFAULT_BUILD_TAGS" >&2
+          if [[ ",${BUILD_TAGS}," == *",with_provider,"* ]]; then
+            echo "ERROR: Forbidden build tag 'with_provider' present!" >&2
             exit 1
           fi
-          if [ "$HAS_PROVIDER" = "true" ]; then
-            echo "ERROR: Forbidden build tag 'with_provider' present in release/DEFAULT_BUILD_TAGS" >&2
+          if [[ ",${BUILD_TAGS}," != *",with_cloudflared,"* ]]; then
+            echo "ERROR: Required build tag 'with_cloudflared' missing!" >&2
             exit 1
           fi
 

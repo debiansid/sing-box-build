@@ -1,0 +1,389 @@
+name: Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Official sing-box version (e.g. 1.14.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: server-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ========================================================
+  # Job 1: Resolve Source Identity & Validate Build Tags
+  # ========================================================
+  metadata:
+    name: Metadata & Source Identity
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      source_repo: ${{ steps.meta.outputs.source_repo }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      commit_sha: ${{ steps.meta.outputs.commit_sha }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      go_version: ${{ steps.meta.outputs.go_version }}
+      build_tags: ${{ steps.meta.outputs.build_tags }}
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          repository: Yuu518/sing-box
+          ref: testing-moon
+          fetch-depth: 0
+
+      - name: Resolve metadata and validate tags
+        id: meta
+        run: |
+          set -xeuo pipefail
+
+          RAW_VER="${{ inputs.version }}"
+          if [[ -z "$RAW_VER" || "$RAW_VER" =~ [[:space:]] ]]; then
+            echo "ERROR: version input cannot be empty or contain whitespace: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VERSION_PATTERN='^v?[0-9]+(\.[0-9]+)+([.-][0-9A-Za-z.-]+)*$'
+          if [[ ! "$RAW_VER" =~ $VERSION_PATTERN ]]; then
+            echo "ERROR: Illegal version format: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VER="${RAW_VER#v}"
+
+          FULL_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          SOURCE_REPO="Yuu518/sing-box"
+          SOURCE_REF="testing-moon"
+
+          if [ ! -f release/DEFAULT_BUILD_TAGS ]; then
+            echo "ERROR: release/DEFAULT_BUILD_TAGS not found in source repository" >&2
+            exit 1
+          fi
+
+          BUILD_TAGS=$(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS)
+          echo "Read build tags: ${BUILD_TAGS}"
+
+          IFS=',' read -ra TAG_LIST <<< "${BUILD_TAGS}"
+          HAS_CLOUDFLARED=false
+          HAS_EBPF=false
+          HAS_PROVIDER=false
+
+          for t in "${TAG_LIST[@]}"; do
+            case "$t" in
+              with_cloudflared) HAS_CLOUDFLARED=true ;;
+              with_ebpf) HAS_EBPF=true ;;
+              with_provider) HAS_PROVIDER=true ;;
+            esac
+          done
+
+          if [ "$HAS_CLOUDFLARED" != "true" ]; then
+            echo "ERROR: Required build tag 'with_cloudflared' missing from release/DEFAULT_BUILD_TAGS" >&2
+            exit 1
+          fi
+          if [ "$HAS_EBPF" = "true" ]; then
+            echo "ERROR: Forbidden build tag 'with_ebpf' present in release/DEFAULT_BUILD_TAGS" >&2
+            exit 1
+          fi
+          if [ "$HAS_PROVIDER" = "true" ]; then
+            echo "ERROR: Forbidden build tag 'with_provider' present in release/DEFAULT_BUILD_TAGS" >&2
+            exit 1
+          fi
+
+          GO_VER="1.26.6"
+
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "source_repo=${SOURCE_REPO}" >> "$GITHUB_OUTPUT"
+          echo "source_ref=${SOURCE_REF}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${FULL_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "go_version=${GO_VER}" >> "$GITHUB_OUTPUT"
+          echo "build_tags=${BUILD_TAGS}" >> "$GITHUB_OUTPUT"
+
+  # ========================================================
+  # Job 2: Matrix Build (linux/amd64 and linux/arm64)
+  # ========================================================
+  build:
+    name: Build DEB (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            deb_arch: amd64
+          - arch: arm64
+            deb_arch: arm64
+    steps:
+      - name: Checkout source repository at exact SHA
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          repository: ${{ needs.metadata.outputs.source_repo }}
+          ref: ${{ needs.metadata.outputs.commit_sha }}
+          path: source
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ needs.metadata.outputs.go_version }}
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-server-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-mod-server-
+
+      - name: Cache Go build cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-server-${{ matrix.arch }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-build-server-${{ matrix.arch }}-
+
+      - name: Build server binary (CGO_ENABLED=0)
+        working-directory: source
+        run: |
+          set -xeuo pipefail
+
+          VERSION="${{ needs.metadata.outputs.version }}"
+          BUILD_TAGS="${{ needs.metadata.outputs.build_tags }}"
+          LDFLAGS_SHARED=$(tr -d '\r\n' < release/LDFLAGS)
+          LDFLAGS="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' ${LDFLAGS_SHARED} -s -w -buildid="
+
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+            go build -v -trimpath \
+            -tags "${BUILD_TAGS}" \
+            -ldflags "${LDFLAGS}" \
+            -o dist/sing-box \
+            ./cmd/sing-box
+
+      - name: Package DEB (systemd-only via .fpm_systemd)
+        working-directory: source
+        run: |
+          set -xeuo pipefail
+          sudo gem install fpm
+
+          VERSION="${{ needs.metadata.outputs.version }}"
+          PKG_VERSION="${VERSION//-/\~}"
+          DEB_NAME="sing-box_${VERSION}_linux_${{ matrix.deb_arch }}.deb"
+
+          cp .fpm_systemd .fpm
+
+          fpm -t deb \
+            --force \
+            -v "$PKG_VERSION" \
+            -p "dist/${DEB_NAME}" \
+            --architecture ${{ matrix.deb_arch }} \
+            dist/sing-box=/usr/bin/sing-box
+
+      - name: Verify DEB and Binary (fail closed)
+        working-directory: source
+        run: |
+          set -xeuo pipefail
+
+          VERSION="${{ needs.metadata.outputs.version }}"
+          DEB_PATH="dist/sing-box_${VERSION}_linux_${{ matrix.deb_arch }}.deb"
+
+          if [ ! -f "$DEB_PATH" ]; then
+            echo "ERROR: Expected DEB file $DEB_PATH not found" >&2
+            exit 1
+          fi
+
+          echo "=== 1. Inspect DEB Info ==="
+          dpkg-deb --info "$DEB_PATH"
+
+          echo "=== 2. Inspect DEB Contents ==="
+          DEB_CONTENTS=$(dpkg-deb --contents "$DEB_PATH")
+          echo "$DEB_CONTENTS"
+
+          if echo "$DEB_CONTENTS" | grep -Fq -- 'etc/init.d/sing-box'; then
+            echo "ERROR: Found /etc/init.d/sing-box in systemd-only DEB package!" >&2
+            exit 1
+          fi
+
+          REQUIRED_FILES=(
+            "usr/bin/sing-box"
+            "usr/lib/systemd/system/sing-box.service"
+            "usr/lib/systemd/system/sing-box@.service"
+            "usr/lib/sysusers.d/sing-box.conf"
+            "etc/sing-box/config.json"
+            "usr/share/polkit-1/rules.d/sing-box.rules"
+            "usr/share/dbus-1/system.d/sing-box-split-dns.conf"
+            "usr/share/bash-completion/completions/sing-box.bash"
+            "usr/share/fish/vendor_completions.d/sing-box.fish"
+            "usr/share/zsh/site-functions/_sing-box"
+            "usr/share/licenses/sing-box/LICENSE"
+          )
+
+          for rf in "${REQUIRED_FILES[@]}"; do
+            if ! echo "$DEB_CONTENTS" | grep -Fq -- "$rf"; then
+              echo "ERROR: Required file from .fpm_systemd missing from DEB: '$rf'" >&2
+              exit 1
+            fi
+          done
+
+          echo "=== 3. Verify extracted binary ==="
+          mkdir -p verify_extract
+          dpkg-deb -x "$DEB_PATH" verify_extract
+          BIN="verify_extract/usr/bin/sing-box"
+
+          if [ ! -f "$BIN" ]; then
+            echo "ERROR: Extracted binary $BIN not found!" >&2
+            exit 1
+          fi
+
+          FILE_INFO=$(file "$BIN")
+          echo "File info: $FILE_INFO"
+
+          case "${{ matrix.arch }}" in
+            amd64)
+              if ! echo "$FILE_INFO" | grep -qi 'x86-64'; then
+                echo "ERROR: Expected x86-64 ELF binary for amd64, got: $FILE_INFO" >&2
+                exit 1
+              fi
+              ;;
+            arm64)
+              if ! echo "$FILE_INFO" | grep -qi 'aarch64'; then
+                echo "ERROR: Expected aarch64 ELF binary for arm64, got: $FILE_INFO" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "ERROR: Unknown architecture ${{ matrix.arch }}" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "=== 4. go version -m audit ==="
+          GO_VERSION_M=$(go version -m "$BIN")
+          echo "$GO_VERSION_M"
+
+          if ! echo "$GO_VERSION_M" | grep -E -q '(^|[[:space:]])CGO_ENABLED=0($|[[:space:]])'; then
+            echo "ERROR: Binary was not built with CGO_ENABLED=0!" >&2
+            exit 1
+          fi
+          if ! echo "$GO_VERSION_M" | grep -E -q "(^|[[:space:]])GOARCH=${{ matrix.arch }}($|[[:space:]])"; then
+            echo "ERROR: Binary GOARCH does not match ${{ matrix.arch }}!" >&2
+            exit 1
+          fi
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: server-deb-${{ matrix.arch }}
+          path: source/dist/*.deb
+
+  # ========================================================
+  # Job 3: Release Server DEBs (Safe Release Ownership)
+  # ========================================================
+  release:
+    name: Release Server DEBs
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - build
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.metadata.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Download all DEB artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          path: release-dist
+          pattern: server-deb-*
+          merge-multiple: true
+
+      - name: Validate both DEBs exist
+        run: |
+          set -xeuo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          AMD64_DEB="release-dist/sing-box_${VERSION}_linux_amd64.deb"
+          ARM64_DEB="release-dist/sing-box_${VERSION}_linux_arm64.deb"
+
+          if [ ! -f "$AMD64_DEB" ]; then
+            echo "ERROR: Missing required artifact: $AMD64_DEB" >&2
+            exit 1
+          fi
+          if [ ! -f "$ARM64_DEB" ]; then
+            echo "ERROR: Missing required artifact: $ARM64_DEB" >&2
+            exit 1
+          fi
+
+          echo "Both amd64 and arm64 DEB artifacts verified present."
+
+      - name: Generate build metadata and checksums
+        run: |
+          set -xeuo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          TAG="v${VERSION}"
+
+          INFO_FILE="release-dist/sing-box_${VERSION}_server_BUILD-INFO.txt"
+          SUMS_FILE="release-dist/sing-box_${VERSION}_server_SHA256SUMS"
+
+          {
+            echo "Official version: ${VERSION}"
+            echo "GitHub release tag: ${TAG}"
+            echo "Source repository: ${{ needs.metadata.outputs.source_repo }}"
+            echo "Source ref: ${{ needs.metadata.outputs.source_ref }}"
+            echo "Full source SHA: ${{ needs.metadata.outputs.commit_sha }}"
+            echo "Short source SHA: ${{ needs.metadata.outputs.short_sha }}"
+            echo "Go version: ${{ needs.metadata.outputs.go_version }}"
+            echo "Build tags: ${{ needs.metadata.outputs.build_tags }}"
+            echo "Architectures: linux/amd64, linux/arm64"
+            echo "CGO_ENABLED: 0"
+            echo "Package format: deb (systemd-only)"
+          } > "$INFO_FILE"
+
+          cd release-dist
+          sha256sum sing-box_${VERSION}_linux_amd64.deb sing-box_${VERSION}_linux_arm64.deb > "sing-box_${VERSION}_server_SHA256SUMS"
+          cd ..
+
+          echo "=== Metadata ==="
+          cat "$INFO_FILE"
+          echo "=== Checksums ==="
+          cat "$SUMS_FILE"
+
+      - name: Upload / Update Release Assets (Per-Asset Clobber)
+        run: |
+          set -xeuo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          TAG="v${VERSION}"
+
+          ASSETS=(
+            "release-dist/sing-box_${VERSION}_linux_amd64.deb"
+            "release-dist/sing-box_${VERSION}_linux_arm64.deb"
+            "release-dist/sing-box_${VERSION}_server_BUILD-INFO.txt"
+            "release-dist/sing-box_${VERSION}_server_SHA256SUMS"
+          )
+
+          for asset in "${ASSETS[@]}"; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: Asset $asset missing before release!" >&2
+              exit 1
+            fi
+          done
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG does not exist. Creating release..."
+            gh release create "$TAG" --title "$TAG" || {
+              gh release view "$TAG" >/dev/null 2>&1 || exit 1
+            }
+          fi
+          echo "Uploading/updating server-owned assets..."
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

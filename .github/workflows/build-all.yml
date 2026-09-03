@@ -17,7 +17,6 @@ on:
           - Binary
           - Android
           - SFA
-          - Linux-package
       forceBeta:
         description: "Force beta package name"
         required: false
@@ -35,7 +34,7 @@ on:
         default: "testing-ebpf-tc"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.build }}
+  group: build-all-${{ github.ref }}-${{ inputs.version }}-${{ inputs.build }}
   cancel-in-progress: true
 
 jobs:
@@ -91,9 +90,21 @@ jobs:
       - name: Set outputs
         id: outputs
         run: |-
+          RAW_VER="${{ inputs.version }}"
+          if [[ -z "$RAW_VER" || "$RAW_VER" =~ [[:space:]] ]]; then
+            echo "ERROR: version input cannot be empty or contain whitespace: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VERSION_PATTERN='^v?[0-9]+(\.[0-9]+)+([.-][0-9A-Za-z.-]+)*$'
+          if [[ ! "$RAW_VER" =~ $VERSION_PATTERN ]]; then
+            echo "ERROR: Illegal version format: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VER="${RAW_VER#v}"
+
           GIT_HASH="${{ steps.source_info.outputs.git_hash }}"
-          FULL_VER="${{ inputs.version }}-${GIT_HASH}"
-          echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          FULL_VER="${VER}-${GIT_HASH}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
 
@@ -102,14 +113,14 @@ jobs:
   # ========================================================
   build:
     name: ${{ matrix.name }}
-    if: inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'SFA' || inputs.build == 'Linux-package'
+    if: inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'SFA'
     runs-on: ${{ matrix.runner }}
     needs:
       - calculate_version
     strategy:
       matrix:
         include:
-          - { name: "Linux amd64 (musl)", os: linux, arch: amd64, variant: musl, runner: ubuntu-latest, type: binary, debian: amd64 }
+          - { name: "Linux amd64 (musl)", os: linux, arch: amd64, variant: musl, runner: ubuntu-latest, type: binary }
           - { name: "Android arm64 core", os: android, arch: arm64, runner: ubuntu-latest, type: android }
           - { name: "Windows amd64", os: windows, arch: amd64, runner: windows-latest, type: binary }
           - { name: "SFA (sing-box for android)", os: android, arch: arm64, runner: ubuntu-latest, type: sfa }
@@ -245,7 +256,7 @@ jobs:
 
       # --- 1. Linux musl 编译 ---
       - name: Build (musl)
-        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
+        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
         run: |
           set -xeuo pipefail
@@ -351,43 +362,10 @@ jobs:
           BUILD_TOOLS_VERSION: "34.0.0"
 
       - name: Set mtime (Linux)
-        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
+        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
         run: |-
           TZ=UTC touch -t '197001010000' dist/sing-box
-      
-      - name: Set package version (Linux)
-        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
-        run: |-
-          PKG_VERSION="${{ needs.calculate_version.outputs.version }}"
-          PKG_VERSION="${PKG_VERSION//-/\~}"
-          echo "PKG_VERSION=${PKG_VERSION}" >> "${GITHUB_ENV}"
-      
-      - name: Set package name (DEB)
-        if: matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Linux-package')
-        run: |-
-          echo "NAME=sing-box" >> "$GITHUB_ENV"
-      
-      - name: Package DEB
-        if: matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Linux-package')
-        working-directory: source
-        run: |
-          set -xeuo pipefail
-          sudo gem install fpm
-          cp .fpm_systemd .fpm
-          fpm -t deb \
-            --name "sing-box" \
-            -v "$PKG_VERSION" \
-            -p "dist/sing-box_${{ needs.calculate_version.outputs.version }}_linux_${{ matrix.debian }}.deb" \
-            --architecture ${{ matrix.debian }} \
-            --after-install release/config/sing-box.postinst \
-            --config-files /etc/sing-box/config.json \
-            dist/sing-box=/usr/bin/sing-box \
-            release/config/config.json=/etc/sing-box/config.json \
-            release/config/sing-box.service=/usr/lib/systemd/system/sing-box.service \
-            release/config/sing-box@.service=/usr/lib/systemd/system/sing-box@.service \
-            release/config/sing-box.sysusers=/usr/lib/sysusers.d/sing-box.conf \
-            release/config/sing-box.initd=/etc/init.d/sing-box
       
       - name: Set name (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
@@ -453,41 +431,27 @@ jobs:
         run: Remove-Item dist/sing-box.exe, dist/sing-box-cli.exe
       
       - name: Upload artifact (Binary/Android core)
-        if: (matrix.type == 'binary' || matrix.type == 'android') && matrix.debian == '' && runner.os != 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android')
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: binary-${{ matrix.os }}_${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) }}
-          path: source/dist
-      
-      - name: Upload artifact (Binary with DEB)
-        if: (matrix.type == 'binary' || matrix.type == 'android') && matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Linux-package')
+        if: (matrix.type == 'binary' || matrix.type == 'android') && runner.os != 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) }}
           path: |
             source/dist/*.tar.gz
             source/dist/*.zip
-      
+
       - name: Upload artifact (Windows GUI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}
           path: "source/dist/*[!-cli].zip"
-      
+
       - name: Upload artifact (Windows CLI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}-cli
           path: "source/dist/*-cli.zip"
-      
-      - name: Upload artifact (DEB package)
-        if: matrix.debian != '' && (inputs.build == 'All' || inputs.build == 'Linux-package')
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: package-deb-${{ matrix.debian }}
-          path: "source/dist/*.deb"
 
       - name: Upload artifact (SFA)
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
@@ -505,6 +469,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: release-${{ needs.calculate_version.outputs.version }}
+      cancel-in-progress: false
     needs:
       - calculate_version
       - build
@@ -513,55 +480,30 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0
-      
-      - name: Cache ghr
-        uses: actions/cache@v6.1.0
-        id: cache-ghr
-        with:
-          path: |
-            ~/go/bin/ghr
-          key: ghr
-      
-      - name: Setup ghr
-        if: steps.cache-ghr.outputs.cache-hit != 'true'
-        run: |-
-          cd $HOME
-          git clone https://github.com/nekohasekai/ghr ghr
-          cd ghr
-          go install -v .
-      
+
       - name: Set tag
         run: |-
-          git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
-          git tag v${{ needs.calculate_version.outputs.version }} -f
           echo "VERSION=${{ needs.calculate_version.outputs.version }}" >> "$GITHUB_ENV"
-      
+
       - name: Download builds
         uses: actions/download-artifact@v8.0.1
         with:
           path: dist
           merge-multiple: true
-      
-      - name: Upload builds
-        if: ${{ env.PUBLISHED == 'false' }}
-        run: |-
-          export PATH="$PATH:$HOME/go/bin"
+
+      - name: Upload builds (Per-Asset Clobber)
+        run: |
+          set -xeuo pipefail
+          TAG="v${VERSION}"
           PRERELEASE_FLAG=""
           if [ "${{ inputs.forceBeta }}" = "true" ]; then
-            PRERELEASE_FLAG="-prerelease"
+            PRERELEASE_FLAG="--prerelease"
           fi
-          ghr --replace $PRERELEASE_FLAG -p 5 -n "${VERSION}" "v${VERSION}" dist
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Replace builds
-        if: ${{ env.PUBLISHED != 'false' }}
-        run: |-
-          export PATH="$PATH:$HOME/go/bin"
-          PRERELEASE_FLAG=""
-          if [ "${{ inputs.forceBeta }}" = "true" ]; then
-            PRERELEASE_FLAG="-prerelease"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "${VERSION}" $PRERELEASE_FLAG || {
+              gh release view "$TAG" >/dev/null 2>&1 || exit 1
+            }
           fi
-          ghr --replace $PRERELEASE_FLAG -p 5 -n "${VERSION}" "v${VERSION}" dist
+          gh release upload "$TAG" dist/* --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

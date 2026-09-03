@@ -162,6 +162,76 @@ jobs:
           PKG_VERSION="${VERSION//-/\~}"
           DEB_NAME="sing-box_${VERSION}_linux_${{ matrix.deb_arch }}.deb"
 
+          cat <<'EOF' > release/config/config.json
+          {
+            "log": {
+              "level": "info"
+            },
+            "dns": {
+              "servers": [
+                {
+                  "type": "tls",
+                  "tag": "google",
+                  "server": "8.8.8.8"
+                }
+              ]
+            },
+            "inbounds": [
+              {
+                "type": "shadowsocks",
+                "listen": "::",
+                "listen_port": 8080,
+                "network": "tcp",
+                "method": "2022-blake3-aes-128-gcm",
+                "password": "Gn1JUS14bLUHgv1cWDDp4A==",
+                "multiplex": {
+                  "enabled": true,
+                  "padding": true
+                }
+              },
+              {
+                "type": "cloudflared",
+                "tag": "cf-tunnel-in",
+                "token": "<CLOUDFLARE_TUNNEL_TOKEN>"
+              },
+              {
+                "type": "trojan",
+                "tag": "trojan-ws-receiver",
+                "listen": "127.0.0.1",
+                "listen_port": 8081,
+                "users": [
+                  {
+                    "name": "default",
+                    "password": "<TROJAN_PASSWORD>"
+                  }
+                ],
+                "transport": {
+                  "type": "ws",
+                  "path": "/trojan-ws"
+                }
+              }
+            ],
+            "outbounds": [
+              {
+                "type": "direct"
+              }
+            ],
+            "route": {
+              "rules": [
+                {
+                  "port": 53,
+                  "action": "hijack-dns"
+                },
+                {
+                  "inbound": "cf-tunnel-in",
+                  "action": "route",
+                  "outbound": "trojan-ws-receiver"
+                }
+              ]
+            }
+          }
+          EOF
+
           cp .fpm_systemd .fpm
 
           fpm -t deb \
@@ -261,6 +331,17 @@ jobs:
             echo "ERROR: Binary GOARCH does not match ${{ matrix.arch }}!" >&2
             exit 1
           fi
+
+          echo "=== 5. Verify extracted /etc/sing-box/config.json ==="
+          EXTRACTED_CONFIG="verify_extract/etc/sing-box/config.json"
+          if [ ! -f "$EXTRACTED_CONFIG" ]; then
+            echo "ERROR: /etc/sing-box/config.json missing from extracted DEB!" >&2
+            exit 1
+          fi
+          grep -Fq -- '"cf-tunnel-in"' "$EXTRACTED_CONFIG" || { echo "ERROR: cf-tunnel-in missing in config.json" >&2; exit 1; }
+          grep -Fq -- '"trojan-ws-receiver"' "$EXTRACTED_CONFIG" || { echo "ERROR: trojan-ws-receiver missing in config.json" >&2; exit 1; }
+          grep -Fq -- '8081' "$EXTRACTED_CONFIG" || { echo "ERROR: port 8081 missing in config.json" >&2; exit 1; }
+          grep -Fq -- '8080' "$EXTRACTED_CONFIG" || { echo "ERROR: port 8080 missing in config.json" >&2; exit 1; }
 
       - name: Upload DEB artifact
         uses: actions/upload-artifact@v7.0.0

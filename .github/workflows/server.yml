@@ -199,7 +199,7 @@ jobs:
 
           VERSION="${{ needs.metadata.outputs.version }}"
           PKG_VERSION="${VERSION//-/\~}"
-          DEB_NAME="sing-box_${VERSION}_linux_${{ matrix.deb_arch }}.deb"
+          DEB_NAME="sing-box-${VERSION}-linux-${{ matrix.deb_arch }}.deb"
 
           cat <<'EOF' > release/config/config.json
           {
@@ -286,7 +286,7 @@ jobs:
           set -xeuo pipefail
 
           VERSION="${{ needs.metadata.outputs.version }}"
-          DEB_PATH="dist/sing-box_${VERSION}_linux_${{ matrix.deb_arch }}.deb"
+          DEB_PATH="dist/sing-box-${VERSION}-linux-${{ matrix.deb_arch }}.deb"
 
           if [ ! -f "$DEB_PATH" ]; then
             echo "ERROR: Expected DEB file $DEB_PATH not found" >&2
@@ -417,8 +417,8 @@ jobs:
         run: |
           set -xeuo pipefail
           VERSION="${{ needs.metadata.outputs.version }}"
-          AMD64_DEB="release-dist/sing-box_${VERSION}_linux_amd64.deb"
-          ARM64_DEB="release-dist/sing-box_${VERSION}_linux_arm64.deb"
+          AMD64_DEB="release-dist/sing-box-${VERSION}-linux-amd64.deb"
+          ARM64_DEB="release-dist/sing-box-${VERSION}-linux-arm64.deb"
 
           if [ ! -f "$AMD64_DEB" ]; then
             echo "ERROR: Missing required artifact: $AMD64_DEB" >&2
@@ -437,8 +437,8 @@ jobs:
           VERSION="${{ needs.metadata.outputs.version }}"
           TAG="v${VERSION}"
 
-          INFO_FILE="release-dist/sing-box_${VERSION}_server_BUILD-INFO.txt"
-          SUMS_FILE="release-dist/sing-box_${VERSION}_server_SHA256SUMS"
+          INFO_FILE="release-dist/sing-box-${VERSION}-server-BUILD-INFO.txt"
+          SUMS_FILE="release-dist/sing-box-${VERSION}-server-SHA256SUMS"
 
           {
             echo "Official version: ${VERSION}"
@@ -455,7 +455,7 @@ jobs:
           } > "$INFO_FILE"
 
           cd release-dist
-          sha256sum sing-box_${VERSION}_linux_amd64.deb sing-box_${VERSION}_linux_arm64.deb > "sing-box_${VERSION}_server_SHA256SUMS"
+          sha256sum sing-box-${VERSION}-linux-amd64.deb sing-box-${VERSION}-linux-arm64.deb > "sing-box-${VERSION}-server-SHA256SUMS"
           cd ..
 
           echo "=== Metadata ==="
@@ -470,10 +470,10 @@ jobs:
           TAG="v${VERSION}"
 
           ASSETS=(
-            "release-dist/sing-box_${VERSION}_linux_amd64.deb"
-            "release-dist/sing-box_${VERSION}_linux_arm64.deb"
-            "release-dist/sing-box_${VERSION}_server_BUILD-INFO.txt"
-            "release-dist/sing-box_${VERSION}_server_SHA256SUMS"
+            "release-dist/sing-box-${VERSION}-linux-amd64.deb"
+            "release-dist/sing-box-${VERSION}-linux-arm64.deb"
+            "release-dist/sing-box-${VERSION}-server-BUILD-INFO.txt"
+            "release-dist/sing-box-${VERSION}-server-SHA256SUMS"
           )
 
           for asset in "${ASSETS[@]}"; do

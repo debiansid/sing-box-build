@@ -57,8 +57,8 @@ jobs:
 
           FULL_SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)
-          SOURCE_REPO="Yuu518/sing-box"
-          SOURCE_REF="testing-moon"
+          SOURCE_REPO="debiansid/sing-box"
+          SOURCE_REF="stable-server"
 
           if [ -f release/DEFAULT_BUILD_TAGS ]; then
             echo "Source release/DEFAULT_BUILD_TAGS (informational): $(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS)"

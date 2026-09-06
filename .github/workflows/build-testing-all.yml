@@ -240,7 +240,7 @@ jobs:
         if: matrix.type == 'android'
         run: |
           set -xeuo pipefail
-          TAGS='with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
+          TAGS='with_quic,with_utls,with_clash_api,with_provider,badlinkname,tfogo_checklinkname0'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
       - name: Set build tags (SFA)

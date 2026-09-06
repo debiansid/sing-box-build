@@ -1,5 +1,5 @@
 
-name: Build Android eBPF
+name: Build Android eBPF tc
 
 on:
   workflow_dispatch:

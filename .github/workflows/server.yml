@@ -31,18 +31,12 @@ jobs:
       go_version: ${{ steps.meta.outputs.go_version }}
       build_tags: ${{ steps.meta.outputs.build_tags }}
     steps:
-      - name: Checkout source repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-        with:
-          repository: Yuu518/sing-box
-          ref: testing-moon
-          fetch-depth: 0
-
-      - name: Resolve metadata and validate tags
-        id: meta
+      # Step 1: 从官方仓库获取 tag 信息（仅用于版本标识）
+      - name: Fetch release tag from official repository
+        id: fetch_tag
         run: |
           set -xeuo pipefail
-
+          
           RAW_VER="${{ inputs.version }}"
           if [[ -z "$RAW_VER" || "$RAW_VER" =~ [[:space:]] ]]; then
             echo "ERROR: version input cannot be empty or contain whitespace: '$RAW_VER'" >&2
@@ -54,9 +48,54 @@ jobs:
             exit 1
           fi
           VER="${RAW_VER#v}"
+          
+          # 从官方仓库获取所有 tags
+          echo "Fetching tags from sagernet/sing-box..."
+          git ls-remote --tags https://github.com/sagernet/sing-box.git > /tmp/official_tags.txt
+          
+          # 查找匹配的 release tag（忽略 prerelease）
+          RELEASE_TAG=$(grep -E "refs/tags/v${VER}$" /tmp/official_tags.txt | head -n1 | sed 's/.*refs\/tags\///' || true)
+          
+          if [[ -z "$RELEASE_TAG" ]]; then
+            echo "ERROR: No release tag found for version v${VER} in sagernet/sing-box" >&2
+            echo "Available release tags (sample):" >&2
+            grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' /tmp/official_tags.txt | tail -10 >&2
+            exit 1
+          fi
+          
+          # 验证不是 prerelease
+          if [[ "${RELEASE_TAG}" =~ -(rc|beta|alpha|pre) ]]; then
+            echo "ERROR: Found tag ${RELEASE_TAG} contains prerelease suffix!" >&2
+            exit 1
+          fi
+          
+          echo "Found official release tag: ${RELEASE_TAG}"
+          echo "OFFICIAL_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+          
+          # 提取版本号（去掉 v 前缀）
+          echo "version=${VER}" >> $GITHUB_OUTPUT
 
+      # Step 2: Checkout 您修改过的代码仓库
+      - name: Checkout modified source repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          repository: debiansid/sing-box
+          ref: stable-server
+          fetch-depth: 0
+
+      - name: Resolve metadata and validate
+        id: meta
+        run: |
+          set -xeuo pipefail
+          
+          VER="${{ steps.fetch_tag.outputs.version }}"
+          
           FULL_SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          echo "Building from modified repository at commit ${FULL_SHA}"
+          echo "Version tag from official: ${{ env.OFFICIAL_TAG }}"
+          
           SOURCE_REPO="debiansid/sing-box"
           SOURCE_REF="stable-server"
 

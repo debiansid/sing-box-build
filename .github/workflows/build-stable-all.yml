@@ -233,14 +233,14 @@ jobs:
         if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
         run: |
           set -xeuo pipefail
-          TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0,with_musl'
+          TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
       
       - name: Set build tags (Android Core)
         if: matrix.type == 'android'
         run: |
           set -xeuo pipefail
-          TAGS='with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
+          TAGS='with_quic,with_utls,with_clash_api,with_provider,badlinkname,tfogo_checklinkname0'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
       - name: Set build tags (SFA)

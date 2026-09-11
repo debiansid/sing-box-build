@@ -15,6 +15,7 @@ on:
         options:
           - All
           - Binary
+          - OpenWrt
           - Android
           - SFA
       forceBeta:
@@ -41,17 +42,19 @@ jobs:
   calculate_version:
     name: Calculate version
     runs-on: ubuntu-latest
+
     outputs:
       version: ${{ steps.outputs.outputs.version }}
       git_hash: ${{ steps.outputs.outputs.git_hash }}
       full_version: ${{ steps.outputs.outputs.full_version }}
       source_git_hash: ${{ steps.source_info.outputs.git_hash }}
+
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0
-      
+
       - name: Checkout source repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
@@ -59,77 +62,122 @@ jobs:
           ref: ${{ inputs.source_ref }}
           path: source
           fetch-depth: 0
-      
+
       - name: Setup Go
         uses: actions/setup-go@v6.4.0
         with:
           go-version: 1.26.6
           cache: false
-      
+
       - name: Cache Go modules
         uses: actions/cache@v6.1.0
         with:
           path: ~/go/pkg/mod
           key: go-mod-linux-${{ hashFiles('source/go.sum') }}
           restore-keys: go-mod-linux-
-      
+
       - name: Cache Go build cache
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-tools-linux-${{ hashFiles('source/go.sum') }}
           restore-keys: go-build-tools-linux-
-      
+
       - name: Get source git hash
         id: source_info
         working-directory: source
         run: |-
           GIT_HASH=$(git rev-parse --short HEAD)
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
-      
+
       - name: Set outputs
         id: outputs
         run: |-
           RAW_VER="${{ inputs.version }}"
+
           if [[ -z "$RAW_VER" || "$RAW_VER" =~ [[:space:]] ]]; then
             echo "ERROR: version input cannot be empty or contain whitespace: '$RAW_VER'" >&2
             exit 1
           fi
+
           VERSION_PATTERN='^v?[0-9]+(\.[0-9]+)+([.-][0-9A-Za-z.-]+)*$'
+
           if [[ ! "$RAW_VER" =~ $VERSION_PATTERN ]]; then
             echo "ERROR: Illegal version format: '$RAW_VER'" >&2
             exit 1
           fi
+
           VER="${RAW_VER#v}"
 
           GIT_HASH="${{ steps.source_info.outputs.git_hash }}"
           FULL_VER="${VER}-${GIT_HASH}"
+
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
 
   # ========================================================
-  # Job 1: 所有目标统一矩阵编译 (Linux, Android Core, Windows, SFA)
+  # Job 1: Unified target matrix
   # ========================================================
   build:
     name: ${{ matrix.name }}
-    if: inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'SFA'
+
+    if: >
+      inputs.build == 'All' ||
+      inputs.build == 'Binary' ||
+      inputs.build == 'OpenWrt' ||
+      inputs.build == 'Android' ||
+      inputs.build == 'SFA'
+
     runs-on: ${{ matrix.runner }}
+
     needs:
       - calculate_version
+
     strategy:
+      fail-fast: false
+
       matrix:
         include:
-          - { name: "Linux amd64 (musl)", os: linux, arch: amd64, variant: musl, runner: ubuntu-latest, type: binary }
-          - { name: "Android arm64 core", os: android, arch: arm64, runner: ubuntu-latest, type: android }
-          - { name: "Windows amd64", os: windows, arch: amd64, runner: windows-latest, type: binary }
-          - { name: "SFA (sing-box for android)", os: android, arch: arm64, runner: ubuntu-latest, type: sfa }
+          - name: "Linux amd64 (musl)"
+            os: linux
+            arch: amd64
+            variant: musl
+            runner: ubuntu-latest
+            type: binary
+
+          - name: "OpenWrt arm64 (musl)"
+            os: linux
+            arch: arm64
+            variant: musl
+            runner: ubuntu-latest
+            type: openwrt
+            openwrt_arch: aarch64_cortex-a53
+
+          - name: "Android arm64 core"
+            os: android
+            arch: arm64
+            runner: ubuntu-latest
+            type: android
+
+          - name: "Windows amd64"
+            os: windows
+            arch: amd64
+            runner: windows-latest
+            type: binary
+
+          - name: "SFA (sing-box for android)"
+            os: android
+            arch: arm64
+            runner: ubuntu-latest
+            type: sfa
+
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0
-      
+
       - name: Checkout source repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
@@ -137,8 +185,10 @@ jobs:
           ref: ${{ inputs.source_ref }}
           path: source
           fetch-depth: 0
-      
-      # SFA 专属：在计算 Gradle Cache 之前拉取 SFA 代码
+
+      # --------------------------------------------------------
+      # SFA source
+      # --------------------------------------------------------
       - name: Checkout SFA Repository
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/checkout@v7
@@ -148,12 +198,15 @@ jobs:
           path: SFA
           submodules: recursive
 
+      # --------------------------------------------------------
+      # Go
+      # --------------------------------------------------------
       - name: Setup Go
         uses: actions/setup-go@v7.0.0
         with:
           go-version: 1.26.6
           cache: false
-      
+
       - name: Cache Go modules (Linux)
         if: runner.os != 'Windows'
         uses: actions/cache@v6.1.0
@@ -161,16 +214,17 @@ jobs:
           path: ~/go/pkg/mod
           key: go-mod-linux-${{ hashFiles('source/go.sum') }}
           restore-keys: go-mod-linux-
-      
-      # 优化：按 matrix.type 隔离 Go 编译缓存，避免 CGO 目标文件相互污染
+
       - name: Cache Go build cache (Linux)
         if: runner.os != 'Windows'
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-build-tools-linux-${{ matrix.type }}-${{ hashFiles('source/go.sum') }}
-          restore-keys: go-build-tools-linux-${{ matrix.type }}-
-      
+          key: go-build-tools-linux-${{ matrix.type }}-${{ matrix.arch }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: |
+            go-build-tools-linux-${{ matrix.type }}-${{ matrix.arch }}-
+            go-build-tools-linux-${{ matrix.type }}-
+
       - name: Cache Go modules (Windows)
         if: runner.os == 'Windows'
         uses: actions/cache@v6.1.0
@@ -178,7 +232,7 @@ jobs:
           path: ~/go/pkg/mod
           key: go-mod-windows-${{ hashFiles('source/go.sum') }}
           restore-keys: go-mod-windows-
-      
+
       - name: Cache Go build cache (Windows)
         if: runner.os == 'Windows'
         uses: actions/cache@v6.1.0
@@ -186,7 +240,47 @@ jobs:
           path: ~/AppData/Local/go-build
           key: go-build-tools-windows-${{ matrix.type }}-${{ hashFiles('source/go.sum') }}
           restore-keys: go-build-tools-windows-${{ matrix.type }}-
-      
+
+      # --------------------------------------------------------
+      # OpenWrt ARM64 musl cross toolchain
+      #
+      # Zig is used only as the Linux ARM64 musl CGO linker.
+      # eBPF bytecode remains compiled by clang via BPF_CLANG.
+      # --------------------------------------------------------
+      - name: Setup Zig
+        if: matrix.type == 'openwrt' && (inputs.build == 'All' || inputs.build == 'OpenWrt')
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.1
+
+      - name: Setup OpenWrt ARM64 musl compiler wrappers
+        if: matrix.type == 'openwrt' && (inputs.build == 'All' || inputs.build == 'OpenWrt')
+        shell: bash
+        run: |
+          set -xeuo pipefail
+
+          CROSS_DIR="${RUNNER_TEMP}/openwrt-cross"
+          mkdir -p "${CROSS_DIR}"
+
+          cat > "${CROSS_DIR}/aarch64-linux-musl-cc" <<'EOF'
+          #!/bin/sh
+          exec zig cc -target aarch64-linux-musl "$@"
+          EOF
+
+          cat > "${CROSS_DIR}/aarch64-linux-musl-cxx" <<'EOF'
+          #!/bin/sh
+          exec zig c++ -target aarch64-linux-musl "$@"
+          EOF
+
+          chmod 0755 \
+            "${CROSS_DIR}/aarch64-linux-musl-cc" \
+            "${CROSS_DIR}/aarch64-linux-musl-cxx"
+
+          echo "${CROSS_DIR}" >> "${GITHUB_PATH}"
+
+      # --------------------------------------------------------
+      # Android NDK
+      # --------------------------------------------------------
       - name: Setup Android NDK
         if: matrix.os == 'android'
         id: setup-ndk
@@ -196,15 +290,16 @@ jobs:
           add-to-path: true
           local-cache: false
 
-      # 优化：改用官方 setup-java Action 秒级恢复预装的 OpenJDK 17
+      # --------------------------------------------------------
+      # Java / Gradle for SFA
+      # --------------------------------------------------------
       - name: Setup OpenJDK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/setup-java@v5.7.0
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
-      
-      # 优化：在 SFA 存在的情况下精准计算包装器 Hash
+
       - name: Cache Gradle
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/cache@v6.1.0
@@ -215,13 +310,16 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('SFA/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
+      # --------------------------------------------------------
+      # Version tag
+      # --------------------------------------------------------
       - name: Set tag (Linux/Android)
         if: runner.os != 'Windows'
         working-directory: source
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
-      
+
       - name: Set tag (Windows)
         if: runner.os == 'Windows'
         working-directory: source
@@ -229,82 +327,227 @@ jobs:
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$env:GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
 
+      # ========================================================
+      # Build tags
+      # ========================================================
+
+      # Existing generic Linux build stays unchanged.
       - name: Set build tags (Linux)
-        if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
+        if: >
+          runner.os != 'Windows' &&
+          matrix.type == 'binary'
+        shell: bash
         run: |
           set -xeuo pipefail
+
           TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0,with_musl'
+
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
-      
+
+      # Dedicated OpenWrt build.
+      #
+      # Intentionally:
+      #   + with_ebpf
+      #   + with_tailscale
+      #   + with_wireguard
+      #   + with_musl
+      #
+      # Intentionally absent:
+      #   - with_gvisor
+      #   - naive / cronet
+      #   - ts_omit_*
+      - name: Set build tags (OpenWrt)
+        if: matrix.type == 'openwrt'
+        shell: bash
+        run: |
+          set -xeuo pipefail
+
+          TAGS='with_quic,with_wireguard,with_utls,with_clash_api,with_provider,with_tailscale,with_ebpf,with_musl,badlinkname,tfogo_checklinkname0'
+
+          echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
+
       - name: Set build tags (Android Core)
         if: matrix.type == 'android'
+        shell: bash
         run: |
           set -xeuo pipefail
+
           TAGS='with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
+
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
       - name: Set build tags (SFA)
         if: matrix.type == 'sfa'
+        shell: bash
         run: |-
           echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
-      
+
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_tailscale,badlinkname,tfogo_checklinkname0"
           echo "BUILD_TAGS=$TAGS" >> $env:GITHUB_ENV
 
-      # --- 1. Linux musl 编译 ---
-      - name: Build (musl)
-        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary')
+      # ========================================================
+      # 1. Existing Linux amd64 musl build
+      # ========================================================
+      - name: Build Linux binary (musl)
+        if: >
+          matrix.type == 'binary' &&
+          matrix.variant == 'musl' &&
+          (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
+        shell: bash
         run: |
           set -xeuo pipefail
+
           mkdir -p dist
+
           make build VERSION="${FULL_VER}"
+
           mv sing-box dist/
         env:
           CGO_ENABLED: "1"
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
           TAGS: ${{ env.BUILD_TAGS }}
-          FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
+          FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 2. Android Core 编译 ---
+      # ========================================================
+      # 2. OpenWrt ARM64 musl build
+      # ========================================================
+      - name: Build OpenWrt ARM64 musl
+        if: >
+          matrix.type == 'openwrt' &&
+          (inputs.build == 'All' || inputs.build == 'OpenWrt')
+        working-directory: source
+        shell: bash
+        run: |
+          set -xeuo pipefail
+
+          mkdir -p dist
+
+          export CC="aarch64-linux-musl-cc"
+          export CXX="aarch64-linux-musl-cxx"
+
+          # BPF compiler is deliberately independent from the userspace
+          # ARM64/musl CGO compiler.
+          export BPF_CLANG="clang"
+
+          make build VERSION="${FULL_VER}"
+
+          mv sing-box dist/
+
+          echo
+          echo "=== built binary ==="
+          file dist/sing-box
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: arm64
+          TAGS: ${{ env.BUILD_TAGS }}
+          FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # --------------------------------------------------------
+      # OpenWrt ELF verification
+      # --------------------------------------------------------
+      - name: Verify OpenWrt ARM64 binary
+        if: >
+          matrix.type == 'openwrt' &&
+          (inputs.build == 'All' || inputs.build == 'OpenWrt')
+        working-directory: source
+        shell: bash
+        run: |
+          set -xeuo pipefail
+
+          echo "=== file ==="
+          file dist/sing-box
+
+          echo
+          echo "=== ELF header ==="
+          readelf -h dist/sing-box | grep -E 'Class:|Data:|Machine:'
+
+          echo
+          echo "=== ELF interpreter ==="
+          readelf -l dist/sing-box | grep -i interpreter || true
+
+          echo
+          echo "=== Dynamic dependencies ==="
+          readelf -d dist/sing-box | grep NEEDED || true
+
+          echo
+          echo "=== Reject Android loader ==="
+
+          if readelf -l dist/sing-box | grep -q '/system/bin/linker'; then
+            echo "ERROR: Android ELF interpreter detected." >&2
+            exit 1
+          fi
+
+          echo
+          echo "=== Reject glibc loader ==="
+
+          if readelf -l dist/sing-box | grep -Eq 'ld-linux-aarch64|glibc'; then
+            echo "ERROR: glibc ELF interpreter detected." >&2
+            exit 1
+          fi
+
+          echo
+          echo "OpenWrt ARM64 ELF verification passed."
+
+      # ========================================================
+      # 3. Android Core
+      # ========================================================
       - name: Build Android core
         if: matrix.type == 'android' && (inputs.build == 'All' || inputs.build == 'Android')
         working-directory: source
+        shell: bash
         run: |
           set -xeuo pipefail
+
           mkdir -p dist
+
           TARGET_CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-          
+
           CC=${TARGET_CLANG} BPF_CLANG=${TARGET_CLANG} \
           make build VERSION="${FULL_VER}"
-          
+
           mv sing-box dist/
         env:
           CGO_ENABLED: "1"
           GOOS: android
           GOARCH: arm64
           TAGS: ${{ env.BUILD_TAGS }}
-          FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
+          FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      # --- 3. Windows 编译 ---
+      # ========================================================
+      # 4. Windows
+      # ========================================================
       - name: Build Windows
         if: matrix.os == 'windows' && (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
+        shell: pwsh
         run: |
           mkdir -p dist
+
           $FULL_VER = "${{ needs.calculate_version.outputs.full_version }}"
-          
-          go build -v -trimpath -o dist/sing-box.exe -tags "$env:BUILD_TAGS" `
+
+          go build `
+            -v `
+            -trimpath `
+            -o dist/sing-box.exe `
+            -tags "$env:BUILD_TAGS" `
             -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=$FULL_VER' -checklinkname=0 -H windowsgui -s -w -buildid=" `
             ./cmd/sing-box
-            
-          go build -v -trimpath -o dist/sing-box-cli.exe -tags "$env:BUILD_TAGS" `
+
+          go build `
+            -v `
+            -trimpath `
+            -o dist/sing-box-cli.exe `
+            -tags "$env:BUILD_TAGS" `
             -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=$FULL_VER' -checklinkname=0 -s -w -buildid=" `
             ./cmd/sing-box
         env:
@@ -313,40 +556,57 @@ jobs:
           GOARCH: amd64
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 4. SFA App 编译 ---
+      # ========================================================
+      # 5. SFA
+      # ========================================================
       - name: Build libbox.aar (SFA)
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         working-directory: source
+        shell: bash
         run: |
-         mkdir -p ../SFA/app/libs/
-         make lib_install
-         FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
-         CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
-         
-         CGO_ENABLED=1 CC=${CC} gomobile bind -v \
-           -target android \
-           -androidapi 23 \
-           -javapkg=io.nekohasekai \
-           -libname=box \
-           -trimpath  \
-           -buildvcs=false \
-           -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
-           -tags "${BUILD_TAGS}" \
-           ./experimental/libbox
-    
-         cp libbox.aar ../SFA/app/libs/
-        env:
-         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          set -xeuo pipefail
 
-      # 优化：移除了 `:app:clean` 开启真正的高效增量构建与 Task 缓存复用
+          mkdir -p ../SFA/app/libs/
+
+          make lib_install
+
+          FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
+
+          CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+
+          CGO_ENABLED=1 CC=${CC} gomobile bind -v \
+            -target android \
+            -androidapi 23 \
+            -javapkg=io.nekohasekai \
+            -libname=box \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
+            -tags "${BUILD_TAGS}" \
+            ./experimental/libbox
+
+          cp libbox.aar ../SFA/app/libs/
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
       - name: Build SFA APK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         working-directory: SFA
+        shell: bash
         run: |
-         sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
-         sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
-         chmod +x ./gradlew
-         ./gradlew --build-cache --parallel :app:assembleOtherRelease && ./gradlew --stop
+          set -xeuo pipefail
+
+          sed -i '/signingConfigs {/,/^    }/d' app/build.gradle.kts
+          sed -i '/signingConfig = signingConfigs/d' app/build.gradle.kts
+
+          chmod +x ./gradlew
+
+          ./gradlew \
+            --build-cache \
+            --parallel \
+            :app:assembleOtherRelease
+
+          ./gradlew --stop
 
       - name: Sign SFA
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
@@ -361,83 +621,153 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
+      # ========================================================
+      # Reproducible timestamp
+      # ========================================================
       - name: Set mtime (Linux)
-        if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary')
+        if: >
+          matrix.os == 'linux' &&
+          matrix.variant == 'musl' &&
+          (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'OpenWrt')
         working-directory: source
+        shell: bash
         run: |-
           TZ=UTC touch -t '197001010000' dist/sing-box
-      
+
+      # ========================================================
+      # Archive names
+      # ========================================================
       - name: Set name (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
+        shell: bash
         run: |-
-          DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
-          if [[ "${{ matrix.variant }}" == "musl" ]]; then
-            DIR_NAME="${DIR_NAME}-musl"
+          if [[ "${{ matrix.type }}" == "openwrt" ]]; then
+            DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-openwrt-${{ matrix.arch }}-musl"
+          else
+            DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
+
+            if [[ "${{ matrix.variant }}" == "musl" ]]; then
+              DIR_NAME="${DIR_NAME}-musl"
+            fi
           fi
+
           echo "DIR_NAME=${DIR_NAME}" >> "${GITHUB_ENV}"
-      
+
       - name: Set name (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |-
           $DIR_NAME = "sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
           echo "DIR_NAME=$DIR_NAME" >> $env:GITHUB_ENV
-      
+
+      # ========================================================
+      # Archive
+      # ========================================================
       - name: Archive (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
         working-directory: source/dist
+        shell: bash
         run: |
           set -xeuo pipefail
+
           mkdir -p "${DIR_NAME}"
-          cp ../LICENSE "${DIR_NAME}"
-          cp sing-box "${DIR_NAME}"
+
+          cp ../LICENSE "${DIR_NAME}/"
+          cp sing-box "${DIR_NAME}/"
+
           tar -czvf "${DIR_NAME}.tar.gz" "${DIR_NAME}"
-          rm -r "${DIR_NAME}"
-      
+
+          rm -rf "${DIR_NAME}"
+
       - name: Archive (Windows)
         if: runner.os == 'Windows'
         working-directory: source
+        shell: pwsh
         run: |
-          # Archive GUI version
           $distDir = "dist"
+
+          # GUI version
           $guiDir = "${env:DIR_NAME}"
           $guiPath = Join-Path $distDir $guiDir
+
           New-Item -ItemType Directory -Force -Path $guiPath | Out-Null
+
           Copy-Item LICENSE $guiPath
           Copy-Item "dist/sing-box.exe" $guiPath
+
           Push-Location $distDir
-          Compress-Archive -Path $guiDir -DestinationPath "${guiDir}.zip" -Force
+
+          Compress-Archive `
+            -Path $guiDir `
+            -DestinationPath "${guiDir}.zip" `
+            -Force
+
           Remove-Item -Recurse -Force $guiDir
+
           Pop-Location
-          
-          # Archive CLI version
+
+          # CLI version
           $cliDir = "${env:DIR_NAME}-cli"
           $cliPath = Join-Path $distDir $cliDir
+
           New-Item -ItemType Directory -Force -Path $cliPath | Out-Null
+
           Copy-Item LICENSE $cliPath
           Copy-Item "dist/sing-box-cli.exe" $cliPath
+
           Push-Location $distDir
-          Compress-Archive -Path $cliDir -DestinationPath "${cliDir}.zip" -Force
+
+          Compress-Archive `
+            -Path $cliDir `
+            -DestinationPath "${cliDir}.zip" `
+            -Force
+
           Remove-Item -Recurse -Force $cliDir
+
           Pop-Location
-      
+
+      # ========================================================
+      # Cleanup binary after archive
+      # ========================================================
       - name: Cleanup (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
         working-directory: source
-        run: rm dist/sing-box
-      
+        shell: bash
+        run: rm -f dist/sing-box
+
       - name: Cleanup (Windows)
         if: runner.os == 'Windows'
         working-directory: source
+        shell: pwsh
         run: Remove-Item dist/sing-box.exe, dist/sing-box-cli.exe
-      
-      - name: Upload artifact (Binary/Android core)
-        if: (matrix.type == 'binary' || matrix.type == 'android') && runner.os != 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android')
+
+      # ========================================================
+      # Upload artifacts
+      # ========================================================
+      - name: Upload artifact (Linux binary / Android core)
+        if: >
+          (matrix.type == 'binary' || matrix.type == 'android') &&
+          runner.os != 'Windows' &&
+          (
+            inputs.build == 'All' ||
+            inputs.build == 'Binary' ||
+            inputs.build == 'Android'
+          )
         uses: actions/upload-artifact@v7.0.0
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) }}
           path: |
             source/dist/*.tar.gz
             source/dist/*.zip
+
+      - name: Upload artifact (OpenWrt)
+        if: >
+          matrix.type == 'openwrt' &&
+          (inputs.build == 'All' || inputs.build == 'OpenWrt')
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: binary-openwrt_${{ matrix.arch }}-musl
+          path: source/dist/*.tar.gz
 
       - name: Upload artifact (Windows GUI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
@@ -461,20 +791,26 @@ jobs:
           path: SFA/app/build/outputs/apk/other/release/*arm64-v8a-unsigned-signed.apk
 
   # ========================================================
-  # Job 2: 发布上传
+  # Job 2: Release upload
   # ========================================================
   upload:
     name: Upload builds
+
     if: "!failure() && !cancelled() && inputs.build != ''"
+
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
+
     concurrency:
       group: release-${{ needs.calculate_version.outputs.version }}
       cancel-in-progress: false
+
     needs:
       - calculate_version
       - build
+
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
@@ -492,18 +828,25 @@ jobs:
           merge-multiple: true
 
       - name: Upload builds (Per-Asset Clobber)
+        shell: bash
         run: |
           set -xeuo pipefail
+
           TAG="v${VERSION}"
           PRERELEASE_FLAG=""
+
           if [ "${{ inputs.forceBeta }}" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
           fi
+
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "${VERSION}" $PRERELEASE_FLAG || {
-              gh release view "$TAG" >/dev/null 2>&1 || exit 1
-            }
+            gh release create "$TAG" \
+              --title "${VERSION}" \
+              $PRERELEASE_FLAG || {
+                gh release view "$TAG" >/dev/null 2>&1 || exit 1
+              }
           fi
+
           gh release upload "$TAG" dist/* --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

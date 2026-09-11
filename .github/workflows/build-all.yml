@@ -274,7 +274,7 @@ jobs:
         if: matrix.type == 'openwrt'
         run: |
           set -xeuo pipefail
-          TAGS='with_quic,with_wireguard,with_utls,with_clash_api,with_provider,with_tailscale,with_ebpf,badlinkname,tfogo_checklinkname0'
+          TAGS='with_quic,with_wireguard,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
       - name: Set build tags (Android Core)

@@ -62,7 +62,7 @@ jobs:
             exit 1
           fi
           VER="${RAW_VER#v}"
-          FULL_VER="${VER}-$(git rev-parse --short HEAD)"
+          FULL_VER="${VER}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "FULL_VER=${FULL_VER}" >> "$GITHUB_ENV"
           echo "PKG_VERSION=${FULL_VER//-/\~}" >> "$GITHUB_ENV"

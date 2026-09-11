@@ -1,0 +1,151 @@
+name: Build OpenWrt IPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version name"
+        required: true
+        type: string
+      forceBeta:
+        description: "Force beta package name"
+        required: false
+        type: boolean
+        default: false
+      source_repo:
+        description: "Source repository (owner/repo)"
+        required: false
+        type: string
+        default: "debiansid/sing-box"
+      source_ref:
+        description: "Source branch/tag/commit"
+        required: false
+        type: string
+        default: "testing-ebpf-tc"
+
+concurrency:
+  group: build-openwrt-ipk-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build aarch64_cortex-a53 IPK
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.4.0
+        with:
+          go-version: 1.26.6
+          cache: true
+
+      - name: Set version
+        id: version
+        env:
+          RAW_VER: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION_PATTERN='^v?[0-9]+(\.[0-9]+)+([.-][0-9A-Za-z.-]+)*$'
+          if [[ ! "$RAW_VER" =~ $VERSION_PATTERN ]]; then
+            echo "ERROR: Illegal version format: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VER="${RAW_VER#v}"
+          FULL_VER="${VER}-$(git rev-parse --short HEAD)"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "FULL_VER=${FULL_VER}" >> "$GITHUB_ENV"
+          echo "PKG_VERSION=${FULL_VER//-/\~}" >> "$GITHUB_ENV"
+
+      - name: Build OpenWrt arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+          BUILD_TAGS: with_quic,with_wireguard,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          LDFLAGS_SHARED=$(cat release/LDFLAGS)
+          go build -v -trimpath -o dist/sing-box -tags "${BUILD_TAGS}" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${FULL_VER}' ${LDFLAGS_SHARED} -s -w -buildid=" \
+            ./cmd/sing-box
+          readelf -h dist/sing-box | grep -E 'Machine:.*AArch64'
+          if readelf -l dist/sing-box | grep -q INTERP; then
+            echo "ERROR: Unexpected ELF interpreter." >&2
+            exit 1
+          fi
+
+      - name: Package OpenWrt IPK
+        # SagerNet/sing-box@testing: .github/workflows/build.yml, Package OpenWrt.
+        run: |
+          set -euo pipefail
+          sudo gem install fpm
+          cp .fpm_openwrt .fpm
+          fpm -t deb \
+            -v "$PKG_VERSION" \
+            -p "dist/openwrt.deb" \
+            --architecture all \
+            dist/sing-box=/usr/bin/sing-box
+          .github/deb2ipk.sh "aarch64_cortex-a53" "dist/openwrt.deb" "dist/sing-box_${FULL_VER}_openwrt_aarch64_cortex-a53.ipk"
+          rm "dist/openwrt.deb"
+
+      - name: Verify IPK architecture
+        run: |
+          set -euo pipefail
+          tar -xOf "dist/sing-box_${FULL_VER}_openwrt_aarch64_cortex-a53.ipk" control.tar.gz \
+            | tar -xzOf - ./control \
+            | grep -x 'Architecture: aarch64_cortex-a53'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: openwrt_aarch64_cortex-a53
+          path: dist/*.ipk
+          if-no-files-found: error
+
+  upload:
+    name: Upload builds
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.build.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: openwrt_aarch64_cortex-a53
+          path: dist
+
+      - name: Upload builds (Per-Asset Clobber)
+        env:
+          GH_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          FORCE_BETA: ${{ inputs.forceBeta }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          PRERELEASE_FLAG=""
+          if [ "$FORCE_BETA" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "${VERSION}" $PRERELEASE_FLAG || {
+              gh release view "$TAG" >/dev/null 2>&1 || exit 1
+            }
+          fi
+          gh release upload "$TAG" dist/*.ipk --clobber

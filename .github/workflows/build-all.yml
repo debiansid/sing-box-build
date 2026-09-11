@@ -15,7 +15,6 @@ on:
         options:
           - All
           - Binary
-          - OpenWrt
           - Android
           - SFA
       forceBeta:
@@ -117,7 +116,6 @@ jobs:
     if: >
       inputs.build == 'All' ||
       inputs.build == 'Binary' ||
-      inputs.build == 'OpenWrt' ||
       inputs.build == 'Android' ||
       inputs.build == 'SFA'
     runs-on: ${{ matrix.runner }}
@@ -135,12 +133,6 @@ jobs:
             variant: musl
             runner: ubuntu-latest
             type: binary
-
-          - name: "OpenWrt arm64"
-            os: linux
-            arch: arm64
-            runner: ubuntu-latest
-            type: openwrt
 
           - name: "Android arm64 core"
             os: android
@@ -270,13 +262,6 @@ jobs:
           TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
-      - name: Set build tags (OpenWrt)
-        if: matrix.type == 'openwrt'
-        run: |
-          set -xeuo pipefail
-          TAGS='with_quic,with_wireguard,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0'
-          echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
-
       - name: Set build tags (Android Core)
         if: matrix.type == 'android'
         run: |
@@ -317,48 +302,6 @@ jobs:
           TAGS: ${{ env.BUILD_TAGS }}
           FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build OpenWrt arm64
-        if: matrix.type == 'openwrt' && (inputs.build == 'All' || inputs.build == 'OpenWrt')
-        working-directory: source
-        run: |
-          set -xeuo pipefail
-          mkdir -p dist
-
-          go build \
-            -v \
-            -trimpath \
-            -o dist/sing-box \
-            -tags "${BUILD_TAGS}" \
-            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${FULL_VER}' ${LDFLAGS_SHARED} -s -w -buildid=" \
-            ./cmd/sing-box
-
-          file dist/sing-box
-        env:
-          CGO_ENABLED: "0"
-          GOOS: linux
-          GOARCH: arm64
-          FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify OpenWrt arm64 binary
-        if: matrix.type == 'openwrt' && (inputs.build == 'All' || inputs.build == 'OpenWrt')
-        working-directory: source
-        run: |
-          set -xeuo pipefail
-
-          file dist/sing-box
-          readelf -h dist/sing-box | grep -E 'Class:|Machine:'
-
-          if ! readelf -h dist/sing-box | grep -q 'Machine:.*AArch64'; then
-            echo "ERROR: Binary is not AArch64." >&2
-            exit 1
-          fi
-
-          if readelf -l dist/sing-box | grep -q '/system/bin/linker'; then
-            echo "ERROR: Android ELF interpreter detected." >&2
-            exit 1
-          fi
 
       - name: Build Android core
         if: matrix.type == 'android' && (inputs.build == 'All' || inputs.build == 'Android')
@@ -446,13 +389,8 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Set mtime (Linux/OpenWrt)
-        if: >
-          matrix.os == 'linux' &&
-          (
-            (matrix.type == 'binary' && (inputs.build == 'All' || inputs.build == 'Binary')) ||
-            (matrix.type == 'openwrt' && (inputs.build == 'All' || inputs.build == 'OpenWrt'))
-          )
+      - name: Set mtime (Linux)
+        if: matrix.os == 'linux' && matrix.type == 'binary' && (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
         run: |-
           TZ=UTC touch -t '197001010000' dist/sing-box
@@ -460,13 +398,9 @@ jobs:
       - name: Set name (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
         run: |-
-          if [[ "${{ matrix.type }}" == "openwrt" ]]; then
-            DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-openwrt-${{ matrix.arch }}"
-          else
-            DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
-            if [[ "${{ matrix.variant }}" == "musl" ]]; then
-              DIR_NAME="${DIR_NAME}-musl"
-            fi
+          DIR_NAME="sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
+          if [[ "${{ matrix.variant }}" == "musl" ]]; then
+            DIR_NAME="${DIR_NAME}-musl"
           fi
           echo "DIR_NAME=${DIR_NAME}" >> "${GITHUB_ENV}"
 
@@ -538,13 +472,6 @@ jobs:
           path: |
             source/dist/*.tar.gz
             source/dist/*.zip
-
-      - name: Upload artifact (OpenWrt)
-        if: matrix.type == 'openwrt' && (inputs.build == 'All' || inputs.build == 'OpenWrt')
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: binary-openwrt_${{ matrix.arch }}
-          path: source/dist/*.tar.gz
 
       - name: Upload artifact (Windows GUI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')

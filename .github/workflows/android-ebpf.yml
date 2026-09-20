@@ -59,7 +59,8 @@ jobs:
           - goarch: arm64
             compiler: aarch64-linux-android35-clang
     env:
-      TAGS: with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0
+      TAGS: with_quic,with_utls,with_clash_api,with_ebpf,badlinkname,tfogo_checklinkname0
+      
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@v6

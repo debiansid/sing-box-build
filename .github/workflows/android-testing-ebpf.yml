@@ -16,13 +16,13 @@ on:
 
 jobs:
   calculate_version:
-    name: Calculate stable version
+    name: Calculate prerelease version
     runs-on: ubuntu-latest
 
     outputs:
       full_version: ${{ steps.outputs.outputs.full_version }}
       short_commit: ${{ steps.outputs.outputs.short_commit }}
-      stable_tag: ${{ steps.outputs.outputs.stable_tag }}
+      upstream_tag: ${{ steps.outputs.outputs.upstream_tag }}
 
     steps:
       - name: Checkout source repo
@@ -33,7 +33,7 @@ jobs:
           path: source
           fetch-depth: 0
 
-      - name: Get official stable version
+      - name: Get latest official prerelease version
         id: outputs
         working-directory: source
         env:
@@ -41,14 +41,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Latest official stable release.
-          # GitHub releases/latest excludes prereleases and drafts.
+          # Latest official non-stable release.
+          # Drafts and stable releases are ignored.
           LATEST_TAG=$(gh api \
-            repos/SagerNet/sing-box/releases/latest \
-            --jq '.tag_name')
+            repos/SagerNet/sing-box/releases \
+            --jq '[.[] | select(.draft == false and .prerelease == true)][0].tag_name')
 
           if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            echo "Failed to resolve latest stable SagerNet/sing-box release" >&2
+            echo "Failed to resolve latest prerelease from SagerNet/sing-box" >&2
             exit 1
           fi
 
@@ -56,11 +56,11 @@ jobs:
           GIT_HASH=$(git rev-parse --short HEAD)
           FULL_VER="${VERSION}-${GIT_HASH}"
 
-          echo "Official stable tag: ${LATEST_TAG}"
+          echo "Official prerelease tag: ${LATEST_TAG}"
           echo "Source commit: ${GIT_HASH}"
           echo "Build version: ${FULL_VER}"
 
-          echo "stable_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "upstream_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
           echo "short_commit=${GIT_HASH}" >> "$GITHUB_OUTPUT"
 
@@ -200,7 +200,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
-          STABLE_TAG: ${{ needs.calculate_version.outputs.stable_tag }}
+          UPSTREAM_TAG: ${{ needs.calculate_version.outputs.upstream_tag }}
           SOURCE_REPO: ${{ inputs.source_repo }}
           SOURCE_REF: ${{ inputs.source_ref }}
           SOURCE_COMMIT: ${{ needs.calculate_version.outputs.short_commit }}
@@ -217,7 +217,7 @@ jobs:
             exit 1
           fi
 
-          echo "Official stable base: ${STABLE_TAG}"
+          echo "Official prerelease base: ${UPSTREAM_TAG}"
           echo "Source: ${SOURCE_REPO}@${SOURCE_REF}"
           echo "Source commit: ${SOURCE_COMMIT}"
           echo "Release tag: ${TAG}"
@@ -227,7 +227,7 @@ jobs:
             gh release create "$TAG" \
               --target "$BUILDER_COMMIT" \
               --title "Android eBPF TC bypass ${FULL_VER}" \
-              --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), based on official stable ${STABLE_TAG}." \
+              --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), based on official prerelease ${UPSTREAM_TAG}." \
               --prerelease || {
                 gh release view "$TAG" >/dev/null 2>&1 || exit 1
               }

@@ -31,7 +31,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-base"
+        default: "testing-ebpf"
 
 concurrency:
   group: build-all-${{ github.ref }}-${{ inputs.version }}-${{ inputs.build }}

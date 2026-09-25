@@ -1,4 +1,3 @@
-
 name: Build Android stable eBPF
 
 on:
@@ -19,14 +18,18 @@ jobs:
   calculate_version:
     name: Calculate version
     runs-on: ubuntu-latest
+
     outputs:
-      full_version: ${{ steps.outputs.outputs.full_version }}
+      full_version: ${{ steps.version.outputs.full_version }}
+      upstream_tag: ${{ steps.version.outputs.upstream_tag }}
+      short_commit: ${{ steps.version.outputs.short_commit }}
+
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      
+
       - name: Checkout source repo
         uses: actions/checkout@v6
         with:
@@ -34,39 +37,71 @@ jobs:
           ref: ${{ inputs.source_ref }}
           path: source
           fetch-depth: 0
-      
-      - name: Get version
-        id: outputs
+
+      - name: Get upstream stable release version
+        id: version
         working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/tags | jq -r '.[0].name')
-          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          set -euo pipefail
+
+          echo "Resolving latest stable release from SagerNet/sing-box..."
+
+          UPSTREAM_TAG="$(
+            curl -fsSL \
+              --retry 3 \
+              --retry-delay 2 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/SagerNet/sing-box/releases/latest" \
+              | jq -r '.tag_name'
+          )"
+
+          if [ -z "${UPSTREAM_TAG}" ] || [ "${UPSTREAM_TAG}" = "null" ]; then
+            echo "::error::Failed to resolve latest stable release from SagerNet/sing-box"
+            exit 1
           fi
-          LATEST_TAG=${LATEST_TAG#v}
-          GIT_HASH=$(git rev-parse --short HEAD)
-          FULL_VER="${LATEST_TAG}-${GIT_HASH}"
+
+          VERSION="${UPSTREAM_TAG#v}"
+          SHORT_COMMIT="$(git rev-parse --short HEAD)"
+          FULL_VER="${VERSION}-${SHORT_COMMIT}"
+
+          echo "Upstream stable release : ${UPSTREAM_TAG}"
+          echo "Stable version          : ${VERSION}"
+          echo "Source repository       : ${{ inputs.source_repo }}"
+          echo "Source ref              : ${{ inputs.source_ref }}"
+          echo "Source commit           : $(git rev-parse HEAD)"
+          echo "Build version           : ${FULL_VER}"
+
+          echo "upstream_tag=${UPSTREAM_TAG}" >> "$GITHUB_OUTPUT"
+          echo "short_commit=${SHORT_COMMIT}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
 
   build:
+    name: Build Android arm64 eBPF
     runs-on: ubuntu-24.04
+
     needs:
       - calculate_version
+
     strategy:
       fail-fast: false
       matrix:
         include:
           - goarch: arm64
             compiler: aarch64-linux-android35-clang
+
     env:
       TAGS: with_quic,with_utls,with_clash_api,with_ebpf,badlinkname,tfogo_checklinkname0
-      
+
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      
+
       - name: Checkout source repo
         uses: actions/checkout@v6
         with:
@@ -78,9 +113,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: 1.27.0
+          go-version: "1.27.0"
           cache-dependency-path: source/go.mod
-
 
       - name: Setup Android NDK
         id: setup-ndk
@@ -99,10 +133,147 @@ jobs:
           BPF_CLANG: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
           FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
         run: |
+          set -euo pipefail
+
+          echo "Building sing-box..."
+          echo "Version : ${FULL_VER}"
+          echo "GOOS    : ${GOOS}"
+          echo "GOARCH  : ${GOARCH}"
+          echo "CC      : ${CC}"
+          echo "Tags    : ${TAGS}"
+
           make build VERSION="${FULL_VER}"
 
-      - name: Upload
+          test -f sing-box
+          test -s sing-box
+
+          echo
+          echo "Build completed:"
+          ls -lh sing-box
+
+          echo
+          echo "File information:"
+          file sing-box
+
+          echo
+          echo "SHA256:"
+          sha256sum sing-box
+
+      - name: Create archive
+        working-directory: source
+        env:
+          FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
+        run: |
+          set -euo pipefail
+
+          ARCHIVE="sing-box-android-arm64-with-ebpf-${FULL_VER}.tar.gz"
+
+          tar -czf "${ARCHIVE}" sing-box
+
+          echo "Created archive:"
+          ls -lh "${ARCHIVE}"
+
+          echo
+          echo "Archive contents:"
+          tar -tzf "${ARCHIVE}"
+
+          echo
+          echo "Archive SHA256:"
+          sha256sum "${ARCHIVE}"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: sing-box-android-arm64-with-ebpf
-          path: source/sing-box
+          name: sing-box-android-arm64-ebpf-${{ needs.calculate_version.outputs.short_commit }}
+          path: source/sing-box-android-arm64-with-ebpf-${{ needs.calculate_version.outputs.full_version }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+
+    needs:
+      - calculate_version
+      - build
+
+    permissions:
+      contents: write
+
+    concurrency:
+      group: release-android-stable-ebpf-${{ needs.calculate_version.outputs.full_version }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Download archive
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: sing-box-android-arm64-ebpf-${{ needs.calculate_version.outputs.short_commit }}
+          path: artifact
+
+      - name: Verify downloaded artifact
+        run: |
+          set -euo pipefail
+
+          echo "Downloaded files:"
+          find artifact -maxdepth 2 -type f -print
+
+          ARCHIVE=$(find artifact -maxdepth 2 -type f -name '*.tar.gz' -print -quit)
+
+          if [ -z "$ARCHIVE" ]; then
+            echo "Archive not found" >&2
+            exit 1
+          fi
+
+          echo
+          echo "Archive: ${ARCHIVE}"
+
+          echo
+          echo "Archive contents:"
+          tar -tzf "$ARCHIVE"
+
+          echo
+          echo "Archive SHA256:"
+          sha256sum "$ARCHIVE"
+
+      - name: Publish archive
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
+          UPSTREAM_TAG: ${{ needs.calculate_version.outputs.upstream_tag }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_COMMIT: ${{ needs.calculate_version.outputs.short_commit }}
+          BUILDER_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          TAG="android-stable-ebpf-${FULL_VER}"
+
+          ARCHIVE=$(find artifact -maxdepth 2 -type f -name '*.tar.gz' -print -quit)
+
+          if [ -z "$ARCHIVE" ]; then
+            echo "Archive not found" >&2
+            exit 1
+          fi
+
+          echo "Official stable base : ${UPSTREAM_TAG}"
+          echo "Source               : ${SOURCE_REPO}@${SOURCE_REF}"
+          echo "Source commit        : ${SOURCE_COMMIT}"
+          echo "Release tag          : ${TAG}"
+          echo "Release asset        : ${ARCHIVE}"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target "$BUILDER_COMMIT" \
+              --title "Android stable eBPF ${FULL_VER}" \
+              --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), based on official stable release ${UPSTREAM_TAG}." || {
+                gh release view "$TAG" >/dev/null 2>&1 || exit 1
+              }
+          fi
+
+          gh release upload \
+            "$TAG" \
+            "$ARCHIVE" \
+            --clobber

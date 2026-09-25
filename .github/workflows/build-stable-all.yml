@@ -31,7 +31,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "stable-ebpf"
+        default: "stable-base"
 
 concurrency:
   group: build-all-${{ github.ref }}-${{ inputs.version }}-${{ inputs.build }}
@@ -233,25 +233,25 @@ jobs:
         if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
         run: |
           set -xeuo pipefail
-          TAGS='with_gvisor,with_quic,with_utls,with_clash_api,with_provider,badlinkname,tfogo_checklinkname0,with_musl'
+          TAGS='with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
       
       - name: Set build tags (Android Core)
         if: matrix.type == 'android'
         run: |
           set -xeuo pipefail
-          TAGS='with_quic,with_utls,with_clash_api,with_provider,badlinkname,tfogo_checklinkname0'
+          TAGS='with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
       - name: Set build tags (SFA)
         if: matrix.type == 'sfa'
         run: |-
-          echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
+          echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
       
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
         run: |
-          $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_tailscale,badlinkname,tfogo_checklinkname0"
+          $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_tailscale,badlinkname,tfogo_checklinkname0"
           echo "BUILD_TAGS=$TAGS" >> $env:GITHUB_ENV
 
       # --- 1. Linux musl 编译 ---

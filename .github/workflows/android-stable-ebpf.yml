@@ -1,5 +1,5 @@
 
-name: Build Android eBPF
+name: Build Android stable eBPF
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "testing-ebpf"
+        default: "stable-ebpf"
 
 jobs:
   calculate_version:

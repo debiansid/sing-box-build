@@ -13,6 +13,10 @@ on:
         required: false
         type: string
         default: "testing-ebpf"
+      version:
+        description: "Version (e.g. 1.15.0-alpha.7 or v1.15.0-alpha.7)"
+        required: true
+        type: string
 
 jobs:
   calculate_version:
@@ -33,34 +37,31 @@ jobs:
           path: source
           fetch-depth: 0
 
-      - name: Get latest official prerelease version
+      - name: Get manually specified version
         id: outputs
         working-directory: source
         env:
-          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
-          # Latest official non-stable release.
-          # Drafts and stable releases are ignored.
-          LATEST_TAG=$(gh api \
-            repos/SagerNet/sing-box/releases \
-            --jq '[.[] | select(.draft == false and .prerelease == true)][0].tag_name')
+          VERSION="${INPUT_VERSION#v}"
 
-          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            echo "Failed to resolve latest prerelease from SagerNet/sing-box" >&2
+          if [ -z "$VERSION" ]; then
+            echo "Version must not be empty" >&2
             exit 1
           fi
 
-          VERSION="${LATEST_TAG#v}"
+          UPSTREAM_TAG="v${VERSION}"
           GIT_HASH=$(git rev-parse --short HEAD)
           FULL_VER="${VERSION}-${GIT_HASH}"
 
-          echo "Official prerelease tag: ${LATEST_TAG}"
+          echo "Specified version: ${VERSION}"
+          echo "Version tag: ${UPSTREAM_TAG}"
           echo "Source commit: ${GIT_HASH}"
           echo "Build version: ${FULL_VER}"
 
-          echo "upstream_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "upstream_tag=${UPSTREAM_TAG}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
           echo "short_commit=${GIT_HASH}" >> "$GITHUB_OUTPUT"
 
@@ -217,7 +218,7 @@ jobs:
             exit 1
           fi
 
-          echo "Official prerelease base: ${UPSTREAM_TAG}"
+          echo "Specified version: ${UPSTREAM_TAG}"
           echo "Source: ${SOURCE_REPO}@${SOURCE_REF}"
           echo "Source commit: ${SOURCE_COMMIT}"
           echo "Release tag: ${TAG}"
@@ -227,7 +228,7 @@ jobs:
             gh release create "$TAG" \
               --target "$BUILDER_COMMIT" \
               --title "Android eBPF TC bypass ${FULL_VER}" \
-              --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), based on official prerelease ${UPSTREAM_TAG}." \
+              --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), version ${UPSTREAM_TAG}." \
               --prerelease || {
                 gh release view "$TAG" >/dev/null 2>&1 || exit 1
               }

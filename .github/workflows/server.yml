@@ -103,7 +103,7 @@ jobs:
             echo "Source release/DEFAULT_BUILD_TAGS (informational): $(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS)"
           fi
 
-          BUILD_TAGS="with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl,with_cloudflared"
+          BUILD_TAGS="with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl,with_cloudflared,with_tailscale"
 
           # Fail-closed tag assertions
           if [[ ",${BUILD_TAGS}," == *",with_ebpf,"* ]]; then

@@ -21,7 +21,7 @@ on:
 jobs:
   calculate_version:
     name: Calculate prerelease version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     outputs:
       full_version: ${{ steps.outputs.outputs.full_version }}
@@ -35,7 +35,7 @@ jobs:
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_ref }}
           path: source
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Get manually specified version
         id: outputs
@@ -96,17 +96,6 @@ jobs:
         with:
           ndk-version: r29
 
-      - name: Generate eBPF objects
-        working-directory: source
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          BPF_CLANG: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
-        run: |
-          set -euo pipefail
-
-          make ebpf_generate
-          make ebpf_check
-
       - name: Build
         working-directory: source
         env:
@@ -158,7 +147,7 @@ jobs:
 
   publish:
     name: Publish release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     needs:
       - calculate_version

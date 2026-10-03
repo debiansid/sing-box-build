@@ -21,7 +21,7 @@ jobs:
   # ========================================================
   metadata:
     name: Metadata & Source Identity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.meta.outputs.version }}
       source_repo: ${{ steps.meta.outputs.source_repo }}
@@ -134,7 +134,7 @@ jobs:
   # ========================================================
   build:
     name: Build DEB (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: metadata
     strategy:
       fail-fast: false
@@ -393,7 +393,7 @@ jobs:
   # ========================================================
   release:
     name: Release Server DEBs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - metadata
       - build

@@ -17,7 +17,7 @@ on:
 jobs:
   calculate_version:
     name: Calculate version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     outputs:
       full_version: ${{ steps.version.outputs.full_version }}
@@ -25,18 +25,13 @@ jobs:
       short_commit: ${{ steps.version.outputs.short_commit }}
 
     steps:
-      - name: Checkout builder repo
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - name: Checkout source repo
         uses: actions/checkout@v6
         with:
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_ref }}
           path: source
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Get upstream stable release version
         id: version
@@ -191,7 +186,7 @@ jobs:
 
   publish:
     name: Publish release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     needs:
       - calculate_version

@@ -10,14 +10,15 @@ on:
   #手动清理
   workflow_dispatch:
 
-permissions: write-all
+permissions:
+  actions: write
 
 jobs:
   auto_clean:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Delete old Workflows (keep latest 1 day)
-        uses: ophub/delete-releases-workflows@main
+        uses: ophub/delete-releases-workflows@f5873e66feb0a85460d7fbc073de6c89470e94d3 # v1
         with:
           gh_token: ${{secrets.GITHUB_TOKEN}}
           delete_releases: false

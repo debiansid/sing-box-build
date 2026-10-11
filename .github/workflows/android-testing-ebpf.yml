@@ -73,7 +73,7 @@ jobs:
       - calculate_version
 
     env:
-      TAGS: with_quic,with_utls,with_clash_api,with_provider,with_ebpf,badlinkname,tfogo_checklinkname0
+      TAGS: with_quic,with_utls,with_clash_api,with_provider,with_ebpf,with_tailscale,badlinkname,tfogo_checklinkname0
 
     steps:
       - name: Checkout source repo

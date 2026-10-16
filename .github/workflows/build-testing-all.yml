@@ -194,7 +194,7 @@ jobs:
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
         run: |
-          $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_provider,with_tailscale,badlinkname,tfogo_checklinkname0"
+          $TAGS = "with_quic,with_utls,with_clash_api,with_provider,with_tailscale,badlinkname,tfogo_checklinkname0"
           echo "BUILD_TAGS=$TAGS" >> $env:GITHUB_ENV
 
       # --- 1. Linux musl 编译 ---

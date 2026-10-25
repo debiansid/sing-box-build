@@ -129,13 +129,13 @@ jobs:
           mkdir -p dist
 
           tar -czf \
-            "dist/sing-box-${FULL_VER}-android-arm64-ebpf-tc-bypass.tar.gz" \
+            "dist/sing-box-android-arm64-with-ebpf-${FULL_VER}.tar.gz" \
             sing-box \
             LICENSE
 
           echo "Archive contents:"
           tar -tzf \
-            "dist/sing-box-${FULL_VER}-android-arm64-ebpf-tc-bypass.tar.gz"
+            "dist/sing-box-android-arm64-with-ebpf-${FULL_VER}.tar.gz"
 
       - name: Upload archive
         uses: actions/upload-artifact@v7
@@ -157,7 +157,7 @@ jobs:
       contents: write
 
     concurrency:
-      group: release-android-ebpf-tc-bypass-${{ needs.calculate_version.outputs.full_version }}
+      group: release-android-testing-ebpf-${{ needs.calculate_version.outputs.full_version }}
       cancel-in-progress: false
 
     steps:
@@ -198,7 +198,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="android-ebpf-tc-bypass-${FULL_VER}"
+          TAG="android-testing-ebpf-${FULL_VER}"
 
           ARCHIVE=$(find artifact -maxdepth 2 -type f -name '*.tar.gz' -print -quit)
 
@@ -216,7 +216,7 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --target "$BUILDER_COMMIT" \
-              --title "Android eBPF TC bypass ${FULL_VER}" \
+              --title "Android testing eBPF ${FULL_VER}" \
               --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), version ${UPSTREAM_TAG}." \
               --prerelease || {
                 gh release view "$TAG" >/dev/null 2>&1 || exit 1

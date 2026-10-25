@@ -119,7 +119,7 @@ jobs:
             exit 1
           fi
 
-          GO_VER="1.26.6"
+          GO_VER="1.26.10"
 
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "source_repo=${SOURCE_REPO}" >> "$GITHUB_OUTPUT"

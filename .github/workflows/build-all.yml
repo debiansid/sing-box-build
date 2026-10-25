@@ -145,8 +145,8 @@ jobs:
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         uses: actions/checkout@v7
         with:
-          repository: SagerNet/sing-box-for-android
-          ref: dev
+          repository: reF1nd/sing-box-for-android
+          ref: reF1nd-testing
           path: SFA
           submodules: recursive
 

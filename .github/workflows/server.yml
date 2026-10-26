@@ -90,6 +90,13 @@ jobs:
           
           VER="${{ steps.fetch_tag.outputs.version }}"
           
+          # Assets are published under the official version, so the source must contain that release.
+          git fetch --no-tags https://github.com/SagerNet/sing-box.git "refs/tags/${{ env.OFFICIAL_TAG }}:refs/tags/upstream-${{ env.OFFICIAL_TAG }}"
+          if ! git merge-base --is-ancestor "upstream-${{ env.OFFICIAL_TAG }}" HEAD; then
+            echo "ERROR: stable-server does not contain official ${{ env.OFFICIAL_TAG }}" >&2
+            exit 1
+          fi
+
           FULL_SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)
           
@@ -435,7 +442,7 @@ jobs:
         run: |
           set -xeuo pipefail
           VERSION="${{ needs.metadata.outputs.version }}"
-          TAG="v${VERSION}"
+          TAG="${VERSION}"
 
           INFO_FILE="release-dist/sing-box-${VERSION}-server-BUILD-INFO.txt"
           SUMS_FILE="release-dist/sing-box-${VERSION}-server-SHA256SUMS"
@@ -467,7 +474,7 @@ jobs:
         run: |
           set -xeuo pipefail
           VERSION="${{ needs.metadata.outputs.version }}"
-          TAG="v${VERSION}"
+          TAG="${VERSION}"
 
           ASSETS=(
             "release-dist/sing-box-${VERSION}-linux-amd64.deb"
@@ -485,7 +492,7 @@ jobs:
 
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG does not exist. Creating release..."
-            gh release create "$TAG" --title "$TAG" || {
+            gh release create "$TAG" --title "$TAG" --notes "sing-box ${VERSION} stable builds (server DEBs, Android stable eBPF)." || {
               gh release view "$TAG" >/dev/null 2>&1 || exit 1
             }
           fi

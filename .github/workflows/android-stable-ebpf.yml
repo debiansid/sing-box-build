@@ -21,6 +21,7 @@ jobs:
 
     outputs:
       full_version: ${{ steps.version.outputs.full_version }}
+      version: ${{ steps.version.outputs.version }}
       upstream_tag: ${{ steps.version.outputs.upstream_tag }}
       short_commit: ${{ steps.version.outputs.short_commit }}
 
@@ -31,7 +32,7 @@ jobs:
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_ref }}
           path: source
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Get upstream stable release version
         id: version
@@ -60,6 +61,12 @@ jobs:
           fi
 
           VERSION="${UPSTREAM_TAG#v}"
+          # Assets are published under the official version, so the source must contain that release.
+          git fetch --no-tags https://github.com/SagerNet/sing-box.git "refs/tags/${UPSTREAM_TAG}:refs/tags/upstream-${UPSTREAM_TAG}"
+          if ! git merge-base --is-ancestor "upstream-${UPSTREAM_TAG}" HEAD; then
+            echo "::error::${{ inputs.source_repo }}@${{ inputs.source_ref }} does not contain official ${UPSTREAM_TAG}"
+            exit 1
+          fi
           SHORT_COMMIT="$(git rev-parse --short HEAD)"
           FULL_VER="${VERSION}-${SHORT_COMMIT}"
 
@@ -73,6 +80,7 @@ jobs:
           echo "upstream_tag=${UPSTREAM_TAG}" >> "$GITHUB_OUTPUT"
           echo "short_commit=${SHORT_COMMIT}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build Android arm64 eBPF
@@ -196,7 +204,8 @@ jobs:
       contents: write
 
     concurrency:
-      group: release-android-stable-ebpf-${{ needs.calculate_version.outputs.full_version }}
+      # Same group as server.yml's release job: both publish into the shared stable release.
+      group: release-${{ needs.calculate_version.outputs.version }}
       cancel-in-progress: false
 
     steps:
@@ -236,6 +245,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           FULL_VER: ${{ needs.calculate_version.outputs.full_version }}
+          VERSION: ${{ needs.calculate_version.outputs.version }}
           UPSTREAM_TAG: ${{ needs.calculate_version.outputs.upstream_tag }}
           SOURCE_REPO: ${{ inputs.source_repo }}
           SOURCE_REF: ${{ inputs.source_ref }}
@@ -244,7 +254,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="android-stable-ebpf-${FULL_VER}"
+          TAG="${VERSION}"
 
           ARCHIVE=$(find artifact -maxdepth 2 -type f -name '*.tar.gz' -print -quit)
 
@@ -262,8 +272,8 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --target "$BUILDER_COMMIT" \
-              --title "Android stable eBPF ${FULL_VER}" \
-              --notes "Built from ${SOURCE_REPO}@${SOURCE_REF} (${SOURCE_COMMIT}), based on official stable release ${UPSTREAM_TAG}." || {
+              --title "$TAG" \
+              --notes "sing-box ${VERSION} stable builds (server DEBs, Android stable eBPF)." || {
                 gh release view "$TAG" >/dev/null 2>&1 || exit 1
               }
           fi

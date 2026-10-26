@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-name: Auto-Clean
+name: Maintenance · Clean runs
 
 on:
-  #自动清理：每天早上5点（UTC 21:00）
+  # Daily at 21:00 UTC (05:00 UTC+8).
   schedule:
     - cron: 0 21 * * *
-  #手动清理
   workflow_dispatch:
 
 permissions:
@@ -17,11 +16,11 @@ jobs:
   auto_clean:
     runs-on: ubuntu-24.04
     steps:
-      - name: Delete old Workflows (keep latest 1 day)
+      - name: Delete workflow runs older than 30 days
         uses: ophub/delete-releases-workflows@f5873e66feb0a85460d7fbc073de6c89470e94d3 # v1
         with:
           gh_token: ${{secrets.GITHUB_TOKEN}}
           delete_releases: false
           delete_tags: false
           delete_workflows: true
-          workflows_keep_day: 1
+          workflows_keep_day: 30

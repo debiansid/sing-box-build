@@ -1,4 +1,4 @@
-name: Build stable
+name: Testing · All platforms
 
 on:
   workflow_dispatch:
@@ -31,11 +31,14 @@ on:
         description: "Source branch/tag/commit"
         required: false
         type: string
-        default: "stable-base"
+        default: "testing-base"
 
 concurrency:
-  group: build-all-${{ github.ref }}-${{ inputs.version }}-${{ inputs.build }}
+  group: testing-${{ github.ref }}-${{ inputs.version }}-${{ inputs.build }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   calculate_version:
@@ -48,20 +51,20 @@ jobs:
       source_git_hash: ${{ steps.source_info.outputs.git_hash }}
     steps:
       - name: Checkout source repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_ref }}
           path: source
-          fetch-depth: 0
-      
+          fetch-depth: 1
+
       - name: Get source git hash
         id: source_info
         working-directory: source
         run: |-
           GIT_HASH=$(git rev-parse --short HEAD)
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
-      
+
       - name: Set outputs
         id: outputs
         run: |-
@@ -77,25 +80,15 @@ jobs:
           fi
           VER="${RAW_VER#v}"
 
-          # Assets are published under the official version, so the source must contain that release.
-          git -C source fetch --no-tags https://github.com/SagerNet/sing-box.git "refs/tags/v${VER}:refs/tags/upstream-v${VER}"
-          if ! git -C source merge-base --is-ancestor "upstream-v${VER}" HEAD; then
-            echo "ERROR: ${{ inputs.source_repo }}@${{ inputs.source_ref }} does not contain official v${VER}" >&2
-            exit 1
-          fi
-
           GIT_HASH="${{ steps.source_info.outputs.git_hash }}"
           FULL_VER="${VER}-${GIT_HASH}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "git_hash=${GIT_HASH}" >> "$GITHUB_OUTPUT"
           echo "full_version=${FULL_VER}" >> "$GITHUB_OUTPUT"
 
-  # ========================================================
-  # Job 1: 所有目标统一矩阵编译 (Linux, Android Core, Windows, SFA)
-  # ========================================================
+  # Linux musl, Android core, Windows and SFA in one matrix; inputs.build selects which steps run.
   build:
     name: ${{ matrix.name }}
-    if: inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'SFA'
     runs-on: ${{ matrix.runner }}
     needs:
       - calculate_version
@@ -108,56 +101,54 @@ jobs:
           - { name: "SFA (sing-box for android)", os: android, arch: arm64, runner: ubuntu-24.04, type: sfa }
     steps:
       - name: Checkout builder repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      
+
       - name: Checkout source repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_ref }}
           path: source
           fetch-depth: 0
-      
-      # SFA 专属：在计算 Gradle Cache 之前拉取 SFA 代码
+
+      # SFA is checked out before the Gradle cache key is computed from its wrapper.
       - name: Checkout SFA Repository
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: SagerNet/sing-box-for-android
-          ref: main
+          repository: reF1nd/sing-box-for-android
+          ref: reF1nd-testing
           path: SFA
           submodules: recursive
 
       - name: Setup Go
-        uses: actions/setup-go@v7.0.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.26.10
           cache: true
           cache-dependency-path: source/go.sum
-      
+
       - name: Setup Android NDK
         if: matrix.os == 'android'
         id: setup-ndk
-        uses: nttld/setup-ndk@v1
+        uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1.6.0
         with:
           ndk-version: r29
           add-to-path: true
           local-cache: false
 
-      # 优化：改用官方 setup-java Action 秒级恢复预装的 OpenJDK 17
       - name: Setup OpenJDK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        uses: actions/setup-java@v5.7.0
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: 'temurin'
           java-version: '17'
-      
-      # 优化：在 SFA 存在的情况下精准计算包装器 Hash
+
       - name: Cache Gradle
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        uses: actions/cache@v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.gradle/caches
@@ -169,23 +160,21 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: source
         run: |-
-          git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
-      
+
       - name: Set tag (Windows)
         if: runner.os == 'Windows'
         working-directory: source
         run: |-
-          git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$env:GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
 
       - name: Set build tags (Linux)
         if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
         run: |
           set -xeuo pipefail
-          TAGS='with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl'
+          TAGS='with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
-      
+
       - name: Set build tags (Android Core)
         if: matrix.type == 'android'
         run: |
@@ -196,15 +185,14 @@ jobs:
       - name: Set build tags (SFA)
         if: matrix.type == 'sfa'
         run: |-
-          echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
-      
+          echo "BUILD_TAGS=with_quic,with_utls,with_clash_api,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
+
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
         run: |
-          $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_tailscale,badlinkname,tfogo_checklinkname0"
+          $TAGS = "with_quic,with_utls,with_clash_api,with_tailscale,badlinkname,tfogo_checklinkname0"
           echo "BUILD_TAGS=$TAGS" >> $env:GITHUB_ENV
 
-      # --- 1. Linux musl 编译 ---
       - name: Build (musl)
         if: matrix.variant == 'musl' && (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
@@ -221,7 +209,6 @@ jobs:
           FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 2. Android Core 编译 ---
       - name: Build Android core
         if: matrix.type == 'android' && (inputs.build == 'All' || inputs.build == 'Android')
         working-directory: source
@@ -229,10 +216,10 @@ jobs:
           set -xeuo pipefail
           mkdir -p dist
           TARGET_CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-          
+
           CC=${TARGET_CLANG} BPF_CLANG=${TARGET_CLANG} \
           make build VERSION="${FULL_VER}"
-          
+
           mv sing-box dist/
         env:
           CGO_ENABLED: "1"
@@ -242,18 +229,17 @@ jobs:
           FULL_VER: "${{ needs.calculate_version.outputs.full_version }}"
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      # --- 3. Windows 编译 ---
       - name: Build Windows
         if: matrix.os == 'windows' && (inputs.build == 'All' || inputs.build == 'Binary')
         working-directory: source
         run: |
           mkdir -p dist
           $FULL_VER = "${{ needs.calculate_version.outputs.full_version }}"
-          
+
           go build -v -trimpath -o dist/sing-box.exe -tags "$env:BUILD_TAGS" `
             -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=$FULL_VER' -checklinkname=0 -H windowsgui -s -w -buildid=" `
             ./cmd/sing-box
-            
+
           go build -v -trimpath -o dist/sing-box-cli.exe -tags "$env:BUILD_TAGS" `
             -ldflags "-X=runtime.godebugDefault=asynctimerchan=1 -X 'github.com/sagernet/sing-box/constant.Version=$FULL_VER' -checklinkname=0 -s -w -buildid=" `
             ./cmd/sing-box
@@ -263,7 +249,6 @@ jobs:
           GOARCH: amd64
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 4. SFA App 编译 ---
       - name: Build libbox.aar (SFA)
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         working-directory: source
@@ -272,7 +257,7 @@ jobs:
          make lib_install
          FULL_VER="${{ needs.calculate_version.outputs.full_version }}"
          CC=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
-         
+
          CGO_ENABLED=1 CC=${CC} gomobile bind -v \
            -target android \
            -androidapi 23 \
@@ -283,12 +268,11 @@ jobs:
            -ldflags "-X github.com/sagernet/sing-box/constant.Version=${FULL_VER} -s -w -buildid= -checklinkname=0" \
            -tags "${BUILD_TAGS}" \
            ./experimental/libbox
-    
+
          cp libbox.aar ../SFA/app/libs/
         env:
          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      # 优化：移除了 `:app:clean` 开启真正的高效增量构建与 Task 缓存复用
       - name: Build SFA APK
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
         working-directory: SFA
@@ -300,7 +284,7 @@ jobs:
 
       - name: Sign SFA
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        uses: r0adkll/sign-android-release@v1
+        uses: r0adkll/sign-android-release@349ebdef58775b1e0d8099458af0816dc79b6407 # v1
         id: sign_app
         with:
           releaseDirectory: SFA/app/build/outputs/apk/other/release
@@ -316,7 +300,7 @@ jobs:
         working-directory: source
         run: |-
           TZ=UTC touch -t '197001010000' dist/sing-box
-      
+
       - name: Set name (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
         run: |-
@@ -325,13 +309,13 @@ jobs:
             DIR_NAME="${DIR_NAME}-musl"
           fi
           echo "DIR_NAME=${DIR_NAME}" >> "${GITHUB_ENV}"
-      
+
       - name: Set name (Windows)
         if: runner.os == 'Windows'
         run: |-
           $DIR_NAME = "sing-box-${{ needs.calculate_version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
           echo "DIR_NAME=$DIR_NAME" >> $env:GITHUB_ENV
-      
+
       - name: Archive (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
         working-directory: source/dist
@@ -342,7 +326,7 @@ jobs:
           cp sing-box "${DIR_NAME}"
           tar -czvf "${DIR_NAME}.tar.gz" "${DIR_NAME}"
           rm -r "${DIR_NAME}"
-      
+
       - name: Archive (Windows)
         if: runner.os == 'Windows'
         working-directory: source
@@ -358,7 +342,7 @@ jobs:
           Compress-Archive -Path $guiDir -DestinationPath "${guiDir}.zip" -Force
           Remove-Item -Recurse -Force $guiDir
           Pop-Location
-          
+
           # Archive CLI version
           $cliDir = "${env:DIR_NAME}-cli"
           $cliPath = Join-Path $distDir $cliDir
@@ -369,20 +353,20 @@ jobs:
           Compress-Archive -Path $cliDir -DestinationPath "${cliDir}.zip" -Force
           Remove-Item -Recurse -Force $cliDir
           Pop-Location
-      
+
       - name: Cleanup (Linux/Android)
         if: runner.os != 'Windows' && matrix.type != 'sfa'
         working-directory: source
         run: rm dist/sing-box
-      
+
       - name: Cleanup (Windows)
         if: runner.os == 'Windows'
         working-directory: source
         run: Remove-Item dist/sing-box.exe, dist/sing-box-cli.exe
-      
+
       - name: Upload artifact (Binary/Android core)
         if: (matrix.type == 'binary' || matrix.type == 'android') && runner.os != 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android')
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}${{ matrix.variant && format('-{0}', matrix.variant) }}
           path: |
@@ -391,31 +375,28 @@ jobs:
 
       - name: Upload artifact (Windows GUI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}
           path: "source/dist/*[!-cli].zip"
 
       - name: Upload artifact (Windows CLI)
         if: runner.os == 'Windows' && (inputs.build == 'All' || inputs.build == 'Binary')
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-${{ matrix.os }}_${{ matrix.arch }}-cli
           path: "source/dist/*-cli.zip"
 
       - name: Upload artifact (SFA)
         if: matrix.type == 'sfa' && (inputs.build == 'All' || inputs.build == 'SFA')
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: SFA-${{ needs.calculate_version.outputs.version }}
           path: SFA/app/build/outputs/apk/other/release/*arm64-v8a-unsigned-signed.apk
 
-  # ========================================================
-  # Job 2: 发布上传
-  # ========================================================
   upload:
     name: Upload builds
-    if: "!failure() && !cancelled() && inputs.build != ''"
+    if: "!failure() && !cancelled()"
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -427,7 +408,7 @@ jobs:
       - build
     steps:
       - name: Checkout builder repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -436,7 +417,7 @@ jobs:
           echo "VERSION=${{ needs.calculate_version.outputs.version }}" >> "$GITHUB_ENV"
 
       - name: Download builds
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -450,7 +431,7 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "${VERSION}" --notes "sing-box ${VERSION} stable builds." $PRERELEASE_FLAG || {
+            gh release create "$TAG" --title "${VERSION}" $PRERELEASE_FLAG || {
               gh release view "$TAG" >/dev/null 2>&1 || exit 1
             }
           fi

@@ -319,7 +319,7 @@ jobs:
           echo "DIR_NAME=$DIR_NAME" >> $env:GITHUB_ENV
 
       - name: Archive (Linux/Android)
-        if: runner.os != 'Windows' && matrix.type != 'sfa'
+        if: runner.os != 'Windows' && matrix.type != 'sfa' && hashFiles('source/dist/sing-box') != ''
         working-directory: source/dist
         run: |
           set -xeuo pipefail
@@ -330,7 +330,7 @@ jobs:
           rm -r "${DIR_NAME}"
 
       - name: Archive (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && hashFiles('source/dist/sing-box.exe') != ''
         working-directory: source
         run: |
           # Archive GUI version
@@ -357,12 +357,12 @@ jobs:
           Pop-Location
 
       - name: Cleanup (Linux/Android)
-        if: runner.os != 'Windows' && matrix.type != 'sfa'
+        if: runner.os != 'Windows' && matrix.type != 'sfa' && hashFiles('source/dist/sing-box') != ''
         working-directory: source
         run: rm dist/sing-box
 
       - name: Cleanup (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && hashFiles('source/dist/sing-box.exe') != ''
         working-directory: source
         run: Remove-Item dist/sing-box.exe, dist/sing-box-cli.exe
 

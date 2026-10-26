@@ -96,6 +96,7 @@ jobs:
       matrix:
         include:
           - { name: "Linux amd64 (musl)", os: linux, arch: amd64, variant: musl, runner: ubuntu-24.04, type: binary }
+          - { name: "Linux arm64 (musl)", os: linux, arch: arm64, variant: musl, runner: ubuntu-24.04, type: binary }
           - { name: "Android arm64 core", os: android, arch: arm64, runner: ubuntu-24.04, type: android }
           - { name: "Windows amd64", os: windows, arch: amd64, runner: windows-latest, type: binary }
           - { name: "SFA (sing-box for android)", os: android, arch: arm64, runner: ubuntu-24.04, type: sfa }
@@ -172,7 +173,7 @@ jobs:
         if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
         run: |
           set -xeuo pipefail
-          TAGS='with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl'
+          TAGS='with_quic,with_utls,with_clash_api,with_ebpf,with_tailscale,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
 
       - name: Set build tags (Android Core)
@@ -202,7 +203,8 @@ jobs:
           make build VERSION="${FULL_VER}"
           mv sing-box dist/
         env:
-          CGO_ENABLED: "1"
+          # static: runner gcc would link glibc, breaking musl hosts (Alpine)
+          CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
           TAGS: ${{ env.BUILD_TAGS }}

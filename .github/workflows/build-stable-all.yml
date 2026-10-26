@@ -444,13 +444,13 @@ jobs:
       - name: Upload builds (Per-Asset Clobber)
         run: |
           set -xeuo pipefail
-          TAG="${VERSION}"
+          TAG="v${VERSION}"
           PRERELEASE_FLAG=""
           if [ "${{ inputs.forceBeta }}" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "${VERSION}" $PRERELEASE_FLAG || {
+            gh release create "$TAG" --title "${VERSION}" --notes "sing-box ${VERSION} stable builds." $PRERELEASE_FLAG || {
               gh release view "$TAG" >/dev/null 2>&1 || exit 1
             }
           fi

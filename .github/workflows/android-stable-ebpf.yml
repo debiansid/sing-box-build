@@ -254,7 +254,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="${VERSION}"
+          TAG="v${VERSION}"
 
           ARCHIVE=$(find artifact -maxdepth 2 -type f -name '*.tar.gz' -print -quit)
 
@@ -272,8 +272,8 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --target "$BUILDER_COMMIT" \
-              --title "$TAG" \
-              --notes "sing-box ${VERSION} stable builds (server DEBs, Android stable eBPF)." || {
+              --title "${VERSION}" \
+              --notes "sing-box ${VERSION} stable builds." || {
                 gh release view "$TAG" >/dev/null 2>&1 || exit 1
               }
           fi

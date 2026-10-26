@@ -442,7 +442,7 @@ jobs:
         run: |
           set -xeuo pipefail
           VERSION="${{ needs.metadata.outputs.version }}"
-          TAG="${VERSION}"
+          TAG="v${VERSION}"
 
           INFO_FILE="release-dist/sing-box-${VERSION}-server-BUILD-INFO.txt"
           SUMS_FILE="release-dist/sing-box-${VERSION}-server-SHA256SUMS"
@@ -474,7 +474,7 @@ jobs:
         run: |
           set -xeuo pipefail
           VERSION="${{ needs.metadata.outputs.version }}"
-          TAG="${VERSION}"
+          TAG="v${VERSION}"
 
           ASSETS=(
             "release-dist/sing-box-${VERSION}-linux-amd64.deb"
@@ -492,7 +492,7 @@ jobs:
 
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG does not exist. Creating release..."
-            gh release create "$TAG" --title "$TAG" --notes "sing-box ${VERSION} stable builds (server DEBs, Android stable eBPF)." || {
+            gh release create "$TAG" --title "${VERSION}" --notes "sing-box ${VERSION} stable builds." || {
               gh release view "$TAG" >/dev/null 2>&1 || exit 1
             }
           fi

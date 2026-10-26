@@ -53,7 +53,7 @@ jobs:
           repository: ${{ inputs.source_repo }}
           ref: ${{ inputs.source_ref }}
           path: source
-          fetch-depth: 1
+          fetch-depth: 0
       
       - name: Get source git hash
         id: source_info
@@ -76,6 +76,13 @@ jobs:
             exit 1
           fi
           VER="${RAW_VER#v}"
+
+          # Assets are published under the official version, so the source must contain that release.
+          git -C source fetch --no-tags https://github.com/SagerNet/sing-box.git "refs/tags/v${VER}:refs/tags/upstream-v${VER}"
+          if ! git -C source merge-base --is-ancestor "upstream-v${VER}" HEAD; then
+            echo "ERROR: ${{ inputs.source_repo }}@${{ inputs.source_ref }} does not contain official v${VER}" >&2
+            exit 1
+          fi
 
           GIT_HASH="${{ steps.source_info.outputs.git_hash }}"
           FULL_VER="${VER}-${GIT_HASH}"
@@ -176,7 +183,7 @@ jobs:
         if: runner.os != 'Windows' && matrix.type != 'android' && matrix.type != 'sfa'
         run: |
           set -xeuo pipefail
-          TAGS='with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl'
+          TAGS='with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl'
           echo "BUILD_TAGS=${TAGS}" >> "${GITHUB_ENV}"
       
       - name: Set build tags (Android Core)
@@ -189,12 +196,12 @@ jobs:
       - name: Set build tags (SFA)
         if: matrix.type == 'sfa'
         run: |-
-          echo "BUILD_TAGS=with_quic,with_utls,with_clash_api,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
+          echo "BUILD_TAGS=with_gvisor,with_quic,with_utls,with_clash_api,with_conntrack,without_badtls,badlinkname,tfogo_checklinkname0" >> "${GITHUB_ENV}"
       
       - name: Set build tags (Windows)
         if: runner.os == 'Windows'
         run: |
-          $TAGS = "with_quic,with_utls,with_clash_api,with_tailscale,badlinkname,tfogo_checklinkname0"
+          $TAGS = "with_gvisor,with_quic,with_utls,with_clash_api,with_tailscale,badlinkname,tfogo_checklinkname0"
           echo "BUILD_TAGS=$TAGS" >> $env:GITHUB_ENV
 
       # --- 1. Linux musl 编译 ---
@@ -437,7 +444,7 @@ jobs:
       - name: Upload builds (Per-Asset Clobber)
         run: |
           set -xeuo pipefail
-          TAG="v${VERSION}"
+          TAG="${VERSION}"
           PRERELEASE_FLAG=""
           if [ "${{ inputs.forceBeta }}" = "true" ]; then
             PRERELEASE_FLAG="--prerelease"

@@ -1,0 +1,486 @@
+name: Testing · Server DEB
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Official sing-box version (e.g. 1.15.0-alpha.13)"
+        required: true
+        type: string
+
+concurrency:
+  group: testing-server-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ========================================================
+  # Job 1: Resolve Source Identity & Validate Build Tags
+  # ========================================================
+  metadata:
+    name: Metadata & Source Identity
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      source_repo: ${{ steps.meta.outputs.source_repo }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      commit_sha: ${{ steps.meta.outputs.commit_sha }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      go_version: ${{ steps.meta.outputs.go_version }}
+      build_tags: ${{ steps.meta.outputs.build_tags }}
+    steps:
+      # The official release tag only names the version; code comes from testing-server.
+      - name: Fetch release tag from official repository
+        id: fetch_tag
+        run: |
+          set -xeuo pipefail
+
+          RAW_VER="${{ inputs.version }}"
+          if [[ -z "$RAW_VER" || "$RAW_VER" =~ [[:space:]] ]]; then
+            echo "ERROR: version input cannot be empty or contain whitespace: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VERSION_PATTERN='^v?[0-9]+(\.[0-9]+)+([.-][0-9A-Za-z.-]+)*$'
+          if [[ ! "$RAW_VER" =~ $VERSION_PATTERN ]]; then
+            echo "ERROR: Illegal version format: '$RAW_VER'" >&2
+            exit 1
+          fi
+          VER="${RAW_VER#v}"
+
+          echo "Fetching tags from sagernet/sing-box..."
+          git ls-remote --tags https://github.com/sagernet/sing-box.git > /tmp/official_tags.txt
+
+          RELEASE_TAG=$(grep -E "refs/tags/v${VER}$" /tmp/official_tags.txt | head -n1 | sed 's/.*refs\/tags\///' || true)
+
+          if [[ -z "$RELEASE_TAG" ]]; then
+            echo "ERROR: No release tag found for version v${VER} in sagernet/sing-box" >&2
+            echo "Available release tags (sample):" >&2
+            grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' /tmp/official_tags.txt | tail -10 >&2
+            exit 1
+          fi
+
+          echo "Found official release tag: ${RELEASE_TAG}"
+          echo "OFFICIAL_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+
+      - name: Checkout modified source repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: debiansid/sing-box
+          ref: testing-server
+          fetch-depth: 0
+
+      - name: Resolve metadata and validate
+        id: meta
+        run: |
+          set -xeuo pipefail
+
+          VER="${{ steps.fetch_tag.outputs.version }}"
+
+          # Assets are published under the official version, so the source must contain that release.
+          git fetch --no-tags https://github.com/SagerNet/sing-box.git "refs/tags/${{ env.OFFICIAL_TAG }}:refs/tags/upstream-${{ env.OFFICIAL_TAG }}"
+          if ! git merge-base --is-ancestor "upstream-${{ env.OFFICIAL_TAG }}" HEAD; then
+            echo "ERROR: testing-server does not contain official ${{ env.OFFICIAL_TAG }}" >&2
+            exit 1
+          fi
+
+          FULL_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          echo "Building from modified repository at commit ${FULL_SHA}"
+          echo "Version tag from official: ${{ env.OFFICIAL_TAG }}"
+
+          SOURCE_REPO="debiansid/sing-box"
+          SOURCE_REF="testing-server"
+
+          if [ -f release/DEFAULT_BUILD_TAGS ]; then
+            echo "Source release/DEFAULT_BUILD_TAGS (informational): $(tr -d '\r\n' < release/DEFAULT_BUILD_TAGS)"
+          fi
+
+          BUILD_TAGS="with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,with_musl,with_cloudflared,with_tailscale"
+
+          # Fail-closed tag assertions
+          if [[ ",${BUILD_TAGS}," == *",with_ebpf,"* ]]; then
+            echo "ERROR: Forbidden build tag 'with_ebpf' present!" >&2
+            exit 1
+          fi
+          if [[ ",${BUILD_TAGS}," != *",with_cloudflared,"* ]]; then
+            echo "ERROR: Required build tag 'with_cloudflared' missing!" >&2
+            exit 1
+          fi
+
+          GO_VER="1.26.10"
+
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "source_repo=${SOURCE_REPO}" >> "$GITHUB_OUTPUT"
+          echo "source_ref=${SOURCE_REF}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${FULL_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "go_version=${GO_VER}" >> "$GITHUB_OUTPUT"
+          echo "build_tags=${BUILD_TAGS}" >> "$GITHUB_OUTPUT"
+
+  # ========================================================
+  # Job 2: Matrix Build (linux/amd64 and linux/arm64)
+  # ========================================================
+  build:
+    name: Build DEB (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            deb_arch: amd64
+          - arch: arm64
+            deb_arch: arm64
+    steps:
+      - name: Checkout source repository at exact SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.metadata.outputs.source_repo }}
+          ref: ${{ needs.metadata.outputs.commit_sha }}
+          path: source
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ needs.metadata.outputs.go_version }}
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-testing-server-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-mod-testing-server-
+
+      - name: Cache Go build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-testing-server-${{ matrix.arch }}-${{ hashFiles('source/go.sum') }}
+          restore-keys: go-build-testing-server-${{ matrix.arch }}-
+
+      - name: Build server binary (CGO_ENABLED=0)
+        working-directory: source
+        run: |
+          set -xeuo pipefail
+
+          VERSION="${{ needs.metadata.outputs.version }}"
+          BUILD_TAGS="${{ needs.metadata.outputs.build_tags }}"
+          LDFLAGS_SHARED=$(tr -d '\r\n' < release/LDFLAGS)
+          LDFLAGS="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' ${LDFLAGS_SHARED} -s -w -buildid="
+
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+            go build -v -trimpath \
+            -tags "${BUILD_TAGS}" \
+            -ldflags "${LDFLAGS}" \
+            -o dist/sing-box \
+            ./cmd/sing-box
+
+      - name: Package DEB (systemd-only via .fpm_systemd)
+        working-directory: source
+        run: |
+          set -xeuo pipefail
+          sudo gem install fpm
+
+          VERSION="${{ needs.metadata.outputs.version }}"
+          PKG_VERSION="${VERSION//-/\~}"
+          DEB_NAME="sing-box-${VERSION}-linux-${{ matrix.deb_arch }}.deb"
+
+          cat <<'EOF' > release/config/config.json
+          {
+            "log": {
+              "level": "info"
+            },
+            "dns": {
+              "servers": [
+                {
+                  "type": "tls",
+                  "tag": "google",
+                  "server": "8.8.8.8"
+                }
+              ]
+            },
+            "inbounds": [
+              {
+                "type": "shadowsocks",
+                "listen": "::",
+                "listen_port": 8080,
+                "network": "tcp",
+                "method": "2022-blake3-aes-128-gcm",
+                "password": "Gn1JUS14bLUHgv1cWDDp4A==",
+                "multiplex": {
+                  "enabled": true,
+                  "padding": true
+                }
+              },
+              {
+                "type": "cloudflared",
+                "tag": "cf-tunnel-in",
+                "token": "<CLOUDFLARE_TUNNEL_TOKEN>"
+              },
+              {
+                "type": "trojan",
+                "tag": "trojan-ws-receiver",
+                "listen": "127.0.0.1",
+                "listen_port": 8081,
+                "users": [
+                  {
+                    "name": "default",
+                    "password": "<TROJAN_PASSWORD>"
+                  }
+                ],
+                "transport": {
+                  "type": "ws",
+                  "path": "/trojan-ws"
+                }
+              }
+            ],
+            "outbounds": [
+              {
+                "type": "direct"
+              }
+            ],
+            "route": {
+              "rules": [
+                {
+                  "port": 53,
+                  "action": "hijack-dns"
+                },
+                {
+                  "inbound": "cf-tunnel-in",
+                  "action": "route",
+                  "outbound": "trojan-ws-receiver"
+                }
+              ]
+            }
+          }
+          EOF
+
+          cp .fpm_systemd .fpm
+
+          fpm -t deb \
+            --force \
+            -v "$PKG_VERSION" \
+            -p "dist/${DEB_NAME}" \
+            --architecture ${{ matrix.deb_arch }} \
+            dist/sing-box=/usr/bin/sing-box
+
+      - name: Verify DEB and Binary (fail closed)
+        working-directory: source
+        run: |
+          set -xeuo pipefail
+
+          VERSION="${{ needs.metadata.outputs.version }}"
+          DEB_PATH="dist/sing-box-${VERSION}-linux-${{ matrix.deb_arch }}.deb"
+
+          if [ ! -f "$DEB_PATH" ]; then
+            echo "ERROR: Expected DEB file $DEB_PATH not found" >&2
+            exit 1
+          fi
+
+          echo "=== 1. Inspect DEB Info ==="
+          dpkg-deb --info "$DEB_PATH"
+
+          echo "=== 2. Inspect DEB Contents ==="
+          DEB_CONTENTS=$(dpkg-deb --contents "$DEB_PATH")
+          echo "$DEB_CONTENTS"
+
+          if echo "$DEB_CONTENTS" | grep -Fq -- 'etc/init.d/sing-box'; then
+            echo "ERROR: Found /etc/init.d/sing-box in systemd-only DEB package!" >&2
+            exit 1
+          fi
+
+          REQUIRED_FILES=(
+            "usr/bin/sing-box"
+            "usr/lib/systemd/system/sing-box.service"
+            "usr/lib/systemd/system/sing-box@.service"
+            "etc/sing-box/config.json"
+            "usr/share/dbus-1/system.d/sing-box-split-dns.conf"
+            "usr/share/bash-completion/completions/sing-box.bash"
+            "usr/share/fish/vendor_completions.d/sing-box.fish"
+            "usr/share/zsh/site-functions/_sing-box"
+            "usr/share/licenses/sing-box/LICENSE"
+          )
+
+          for rf in "${REQUIRED_FILES[@]}"; do
+            if ! echo "$DEB_CONTENTS" | grep -Fq -- "$rf"; then
+              echo "ERROR: Required file from .fpm_systemd missing from DEB: '$rf'" >&2
+              exit 1
+            fi
+          done
+
+          echo "=== 3. Verify extracted binary ==="
+          mkdir -p verify_extract
+          dpkg-deb -x "$DEB_PATH" verify_extract
+          BIN="verify_extract/usr/bin/sing-box"
+
+          if [ ! -f "$BIN" ]; then
+            echo "ERROR: Extracted binary $BIN not found!" >&2
+            exit 1
+          fi
+
+          FILE_INFO=$(file "$BIN")
+          echo "File info: $FILE_INFO"
+
+          case "${{ matrix.arch }}" in
+            amd64)
+              if ! echo "$FILE_INFO" | grep -qi 'x86-64'; then
+                echo "ERROR: Expected x86-64 ELF binary for amd64, got: $FILE_INFO" >&2
+                exit 1
+              fi
+              ;;
+            arm64)
+              if ! echo "$FILE_INFO" | grep -qi 'aarch64'; then
+                echo "ERROR: Expected aarch64 ELF binary for arm64, got: $FILE_INFO" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "ERROR: Unknown architecture ${{ matrix.arch }}" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "=== 4. go version -m audit ==="
+          GO_VERSION_M=$(go version -m "$BIN")
+          echo "$GO_VERSION_M"
+
+          if ! echo "$GO_VERSION_M" | grep -E -q '(^|[[:space:]])CGO_ENABLED=0($|[[:space:]])'; then
+            echo "ERROR: Binary was not built with CGO_ENABLED=0!" >&2
+            exit 1
+          fi
+          if ! echo "$GO_VERSION_M" | grep -E -q "(^|[[:space:]])GOARCH=${{ matrix.arch }}($|[[:space:]])"; then
+            echo "ERROR: Binary GOARCH does not match ${{ matrix.arch }}!" >&2
+            exit 1
+          fi
+
+          echo "=== 5. Verify extracted /etc/sing-box/config.json ==="
+          EXTRACTED_CONFIG="verify_extract/etc/sing-box/config.json"
+          if [ ! -f "$EXTRACTED_CONFIG" ]; then
+            echo "ERROR: /etc/sing-box/config.json missing from extracted DEB!" >&2
+            exit 1
+          fi
+          grep -Fq -- '"cf-tunnel-in"' "$EXTRACTED_CONFIG" || { echo "ERROR: cf-tunnel-in missing in config.json" >&2; exit 1; }
+          grep -Fq -- '"trojan-ws-receiver"' "$EXTRACTED_CONFIG" || { echo "ERROR: trojan-ws-receiver missing in config.json" >&2; exit 1; }
+          grep -Fq -- '8081' "$EXTRACTED_CONFIG" || { echo "ERROR: port 8081 missing in config.json" >&2; exit 1; }
+          grep -Fq -- '8080' "$EXTRACTED_CONFIG" || { echo "ERROR: port 8080 missing in config.json" >&2; exit 1; }
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testing-server-deb-${{ matrix.arch }}
+          path: source/dist/*.deb
+
+  # ========================================================
+  # Job 3: Release Server DEBs (Safe Release Ownership)
+  # ========================================================
+  release:
+    name: Release Server DEBs
+    runs-on: ubuntu-24.04
+    needs:
+      - metadata
+      - build
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.metadata.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download all DEB artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-dist
+          pattern: testing-server-deb-*
+          merge-multiple: true
+
+      - name: Validate both DEBs exist
+        run: |
+          set -xeuo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          AMD64_DEB="release-dist/sing-box-${VERSION}-linux-amd64.deb"
+          ARM64_DEB="release-dist/sing-box-${VERSION}-linux-arm64.deb"
+
+          if [ ! -f "$AMD64_DEB" ]; then
+            echo "ERROR: Missing required artifact: $AMD64_DEB" >&2
+            exit 1
+          fi
+          if [ ! -f "$ARM64_DEB" ]; then
+            echo "ERROR: Missing required artifact: $ARM64_DEB" >&2
+            exit 1
+          fi
+
+          echo "Both amd64 and arm64 DEB artifacts verified present."
+
+      - name: Generate build metadata and checksums
+        run: |
+          set -xeuo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          TAG="v${VERSION}"
+
+          INFO_FILE="release-dist/sing-box-${VERSION}-server-BUILD-INFO.txt"
+          SUMS_FILE="release-dist/sing-box-${VERSION}-server-SHA256SUMS"
+
+          {
+            echo "Official version: ${VERSION}"
+            echo "GitHub release tag: ${TAG}"
+            echo "Source repository: ${{ needs.metadata.outputs.source_repo }}"
+            echo "Source ref: ${{ needs.metadata.outputs.source_ref }}"
+            echo "Full source SHA: ${{ needs.metadata.outputs.commit_sha }}"
+            echo "Short source SHA: ${{ needs.metadata.outputs.short_sha }}"
+            echo "Go version: ${{ needs.metadata.outputs.go_version }}"
+            echo "Build tags: ${{ needs.metadata.outputs.build_tags }}"
+            echo "Architectures: linux/amd64, linux/arm64"
+            echo "CGO_ENABLED: 0"
+            echo "Package format: deb (systemd-only)"
+          } > "$INFO_FILE"
+
+          cd release-dist
+          sha256sum sing-box-${VERSION}-linux-amd64.deb sing-box-${VERSION}-linux-arm64.deb > "sing-box-${VERSION}-server-SHA256SUMS"
+          cd ..
+
+          echo "=== Metadata ==="
+          cat "$INFO_FILE"
+          echo "=== Checksums ==="
+          cat "$SUMS_FILE"
+
+      - name: Upload / Update Release Assets (Per-Asset Clobber)
+        run: |
+          set -xeuo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          TAG="v${VERSION}"
+
+          ASSETS=(
+            "release-dist/sing-box-${VERSION}-linux-amd64.deb"
+            "release-dist/sing-box-${VERSION}-linux-arm64.deb"
+            "release-dist/sing-box-${VERSION}-server-BUILD-INFO.txt"
+            "release-dist/sing-box-${VERSION}-server-SHA256SUMS"
+          )
+
+          for asset in "${ASSETS[@]}"; do
+            if [ ! -f "$asset" ]; then
+              echo "ERROR: Asset $asset missing before release!" >&2
+              exit 1
+            fi
+          done
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG does not exist. Creating release..."
+            gh release create "$TAG" --title "${VERSION}" --prerelease || {
+              gh release view "$TAG" >/dev/null 2>&1 || exit 1
+            }
+          fi
+          echo "Uploading/updating server-owned assets..."
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -397,6 +397,7 @@ jobs:
       - build
     permissions:
       contents: write
+      actions: write
     concurrency:
       group: release-${{ needs.metadata.outputs.version }}
       cancel-in-progress: false
@@ -491,3 +492,12 @@ jobs:
           gh release upload "$TAG" "${ASSETS[@]}" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Release assets are the durable copy; drop this run's artifacts instead of waiting for retention.
+      - name: Delete run artifacts
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" -q '.artifacts[].id' |
+            xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"
+        env:
+          GH_TOKEN: ${{ github.token }}

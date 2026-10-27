@@ -120,6 +120,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: write
     concurrency:
       group: release-${{ needs.build.outputs.version }}
       cancel-in-progress: false
@@ -149,3 +150,12 @@ jobs:
             }
           fi
           gh release upload "$TAG" dist/*.ipk --clobber
+
+      # Release assets are the durable copy; drop this run's artifacts instead of waiting for retention.
+      - name: Delete run artifacts
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" -q '.artifacts[].id' |
+            xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/{}"
+        env:
+          GH_TOKEN: ${{ github.token }}

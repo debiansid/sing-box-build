@@ -158,6 +158,10 @@ jobs:
           jq -e '[.kernelRuntime.mapOccupancy.maps[]
             | select(.pressure == "unavailable" or .pressure == "recovery_failed" or .pressure == "degraded")]
             | length == 0' deep.json
+          jq -c '.inbounds[] | {state, localUdpState, localUdpUserspaceCleanupMode, localUdpReleaseFallbackReason}' deep.json
+          jq -e 'all(.inbounds[]; .state == "normal")' deep.json
+          # An active ring-buffer notifier must not also report why it is off.
+          jq -e 'all(.inbounds[]; .localUdpUserspaceCleanupMode != "ringbuf" or .localUdpReleaseFallbackReason == "")' deep.json
 
       - name: Stop sing-box
         if: always()

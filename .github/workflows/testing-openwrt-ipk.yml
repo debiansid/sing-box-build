@@ -1,4 +1,5 @@
-name: Testing eBPF · OpenWrt IPK
+name: Testing eBPF · Build OpenWrt IPK
+run-name: "Testing eBPF · Build OpenWrt IPK · ${{ inputs.version }} · ${{ inputs.source_ref }}"
 
 on:
   workflow_dispatch:

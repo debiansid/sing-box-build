@@ -1,4 +1,5 @@
-name: Testing · All platforms
+name: Testing · Build all platforms
+run-name: "Testing · Build all platforms · ${{ inputs.version }} · ${{ inputs.build }} · ${{ inputs.source_ref }}"
 
 on:
   workflow_dispatch:

@@ -1,4 +1,5 @@
-name: Testing eBPF · Android
+name: Testing eBPF · Build Android
+run-name: "Testing eBPF · Build Android · ${{ inputs.version }} · ${{ inputs.source_ref }}"
 
 on:
   workflow_dispatch:

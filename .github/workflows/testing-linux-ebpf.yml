@@ -1,4 +1,5 @@
-name: Testing eBPF · Linux
+name: Testing eBPF · Verify Linux
+run-name: "Testing eBPF · Verify Linux · ${{ inputs.source_ref }}"
 
 on:
   workflow_dispatch:

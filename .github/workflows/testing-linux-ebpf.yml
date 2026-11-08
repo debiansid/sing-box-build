@@ -128,7 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           jq -n --argjson local "$LOCAL" --argjson uid "$TEST_UID" '{
-            log: {level: "info", timestamp: true},
+            log: {level: "debug", timestamp: true},
             inbounds: [{type: "ebpf", tag: "ebpf-in",
               local: ({enabled: true, include_uid: [$uid]} + $local)}],
             outbounds: [{type: "direct", tag: "direct"}],
@@ -172,7 +172,8 @@ jobs:
           jq -e 'all(.inbounds[]; .localUdpUserspaceCleanupMode != "ringbuf" or .localUdpReleaseFallbackReason == "")' deep.json
 
       - name: Verify self-bypass
-        if: matrix.uid == '0'
+        # A missing matrix.uid compares equal to '0' in expressions.
+        if: env.TEST_UID == '0'
         run: |
           set -euo pipefail
           self_sockets() {
@@ -181,13 +182,13 @@ jobs:
           }
           # Root on a current kernel may set SO_MARK, so the mark fast path must be active.
           grep -E 'self_bypass\W+socket_mark' sing-box.log
-          # A self-loop turns each request into a cascade of inbound connections.
+          # A self-loop turns each request into a cascade of outbound dials.
           for _ in 1 2 3; do
             sudo curl -fsS -o /dev/null --max-time 20 https://www.gstatic.com/generate_204
           done
-          inbound=$(grep -cE 'inbound connection to [^ ]*:443' sing-box.log || true)
-          echo "inbound :443 connections: $inbound" | tee -a "$GITHUB_STEP_SUMMARY"
-          [ "$inbound" -le 20 ]
+          outbound=$(grep -cE 'outbound connection to [^ ]*:443' sing-box.log || true)
+          echo "outbound :443 connections: $outbound" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$outbound" -le 20 ]
           # Failed dials must not leave sing-box's sockets in the self-bypass map.
           before=$(self_sockets)
           for _ in $(seq 8); do

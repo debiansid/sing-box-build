@@ -1,0 +1,179 @@
+name: Testing eBPF · Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "Source repository (owner/repo)"
+        required: false
+        type: string
+        default: "debiansid/sing-box"
+      source_ref:
+        description: "Source branch/tag/commit"
+        required: false
+        type: string
+        default: "testing-ebpf"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.source_repo }}-${{ inputs.source_ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Mirrors the source's ebpf-verifier.yml, which never runs because Actions
+  # are disabled on the sing-box fork.
+  integration:
+    name: Linux integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.10
+          cache-dependency-path: source/go.mod
+
+      - name: Test sing-box integration
+        working-directory: source
+        run: |
+          set -euo pipefail
+          go test -tags with_ebpf \
+            ./adapter ./common/dialer ./common/listener ./common/udpio ./protocol/ebpf ./daemon ./cmd/sing-box .
+          go test -run '^$' -tags with_ebpf,with_gvisor ./protocol/tailscale
+
+      - name: Test sing-ebpf with the consumer module graph
+        working-directory: source
+        run: |
+          set -euo pipefail
+          go test -tags with_ebpf github.com/CHIZI-0618/sing-ebpf/... ./protocol/ebpf
+
+      - name: Run privileged sing-box integration tests
+        working-directory: source
+        run: |
+          set -euo pipefail
+          sudo env "PATH=$PATH" go test -v -count=1 -race -tags with_ebpf ./protocol/ebpf 2>&1 | tee ../verifier.log
+
+      - name: Upload verifier log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ebpf-verifier
+          path: verifier.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Runs the real binary as root and requires that deep diagnostics can verify
+  # map occupancy, so "map health unverified" fails here instead of on a device.
+  runtime:
+    name: Runtime · ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cgroup
+            local: '{"data_plane": "cgroup"}'
+          - name: socket_assign + vpn_server_bypass
+            local: '{"data_plane": "socket_assign", "vpn_server_bypass": {"enabled": true, "ip_cidr": ["203.0.113.0/24"], "port": [500, 4500]}}'
+
+    env:
+      TAGS: with_quic,with_utls,with_clash_api,with_ebpf,badlinkname,tfogo_checklinkname0
+      # Only this UID is intercepted, so the runner agent keeps its own network path.
+      TEST_UID: "65534"
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.10
+          cache-dependency-path: source/go.mod
+
+      - name: Build
+        working-directory: source
+        run: |
+          set -euo pipefail
+          make build TAGS="$TAGS" VERSION="linux-ebpf-test"
+          ./sing-box version
+
+      - name: Start sing-box
+        env:
+          LOCAL: ${{ matrix.local }}
+        run: |
+          set -euo pipefail
+          jq -n --argjson local "$LOCAL" --argjson uid "$TEST_UID" '{
+            log: {level: "info", timestamp: true},
+            inbounds: [{type: "ebpf", tag: "ebpf-in",
+              local: ({enabled: true, include_uid: [$uid]} + $local)}],
+            outbounds: [{type: "direct", tag: "direct"}],
+            services: [{type: "api", listen: "127.0.0.1", listen_port: 9090}]
+          }' > config.json
+          cat config.json
+          sudo source/sing-box check -c config.json
+          sudo sh -c 'source/sing-box run -c config.json > sing-box.log 2>&1 & echo $! > sing-box.pid'
+          for _ in $(seq 30); do
+            source/sing-box api ebpf --url 127.0.0.1:9090 > /dev/null 2>&1 && exit 0
+            sudo kill -0 "$(cat sing-box.pid)" || break
+            sleep 1
+          done
+          cat sing-box.log
+          echo "sing-box did not start" >&2
+          exit 1
+
+      - name: Send intercepted traffic
+        run: |
+          set -euo pipefail
+          sudo -u "#$TEST_UID" curl -fsS -o /dev/null --max-time 20 https://www.gstatic.com/generate_204
+          sudo -u "#$TEST_UID" dig +time=5 +tries=2 @1.1.1.1 example.com A > /dev/null
+          grep -E 'outbound connection to .*:443' sing-box.log
+
+      - name: Verify deep diagnostics
+        run: |
+          set -euo pipefail
+          source/sing-box api ebpf --deep --url 127.0.0.1:9090 > deep.json
+          jq -r '.kernelRuntime.mapOccupancy as $o
+            | "status: \($o.status) \($o.error)",
+              ($o.maps[] | "\(.name)\t\(.entries)/\(.maxEntries)\t\(.pressure)\t\(.error)")' deep.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -e '.kernelRuntime.mapOccupancy.status == "pass"' deep.json
+          jq -e '.kernelRuntime.mapOccupancy.maps | length > 0' deep.json
+          jq -e '[.kernelRuntime.mapOccupancy.maps[]
+            | select(.pressure == "unavailable" or .pressure == "recovery_failed" or .pressure == "degraded")]
+            | length == 0' deep.json
+
+      - name: Stop sing-box
+        if: always()
+        run: |
+          [ -f sing-box.pid ] && sudo kill "$(cat sing-box.pid)" || true
+          sleep 2
+          tail -n 100 sing-box.log || true
+
+      - name: Upload runtime logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ebpf-runtime-${{ strategy.job-index }}
+          path: |
+            config.json
+            sing-box.log
+            deep.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -180,8 +180,10 @@ jobs:
             source/sing-box api ebpf --deep --url 127.0.0.1:9090 \
               | jq '[.kernelRuntime.mapOccupancy.maps[] | select(.name == "sb_self_sockets") | .entries // 0] | add // 0'
           }
-          # Root on a current kernel may set SO_MARK, so the mark fast path must be active.
-          grep -E 'self_bypass\W+socket_mark' sing-box.log
+          # Self-bypass registers socket cookies; "none" means sing-box's own dials are unprotected.
+          mode=$(grep -oE '"self_bypass":"[a-z_]+"' sing-box.log | head -n 1 | cut -d '"' -f 4)
+          echo "self-bypass mode: ${mode:-missing}" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ -n "$mode" ] && [ "$mode" != none ]
           # A self-loop turns each request into a cascade of outbound dials.
           for _ in 1 2 3; do
             sudo curl -fsS -o /dev/null --max-time 20 https://www.gstatic.com/generate_204

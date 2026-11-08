@@ -87,11 +87,19 @@ jobs:
             local: '{"data_plane": "cgroup"}'
           - name: socket_assign + vpn_server_bypass
             local: '{"data_plane": "socket_assign", "vpn_server_bypass": {"enabled": true, "ip_cidr": ["203.0.113.0/24"], "port": [500, 4500]}}'
+          # Intercepting root also intercepts sing-box's own dials, which loop
+          # back into the inbound unless self-bypass excludes them.
+          - name: cgroup self-bypass
+            local: '{"data_plane": "cgroup"}'
+            uid: "0"
+          - name: socket_assign self-bypass
+            local: '{"data_plane": "socket_assign"}'
+            uid: "0"
 
     env:
       TAGS: with_quic,with_utls,with_clash_api,with_ebpf,badlinkname,tfogo_checklinkname0
       # Only this UID is intercepted, so the runner agent keeps its own network path.
-      TEST_UID: "65534"
+      TEST_UID: ${{ matrix.uid || '65534' }}
 
     steps:
       - name: Checkout source repo
@@ -162,6 +170,34 @@ jobs:
           jq -e 'all(.inbounds[]; .state == "normal")' deep.json
           # An active ring-buffer notifier must not also report why it is off.
           jq -e 'all(.inbounds[]; .localUdpUserspaceCleanupMode != "ringbuf" or .localUdpReleaseFallbackReason == "")' deep.json
+
+      - name: Verify self-bypass
+        if: matrix.uid == '0'
+        run: |
+          set -euo pipefail
+          self_sockets() {
+            source/sing-box api ebpf --deep --url 127.0.0.1:9090 \
+              | jq '[.kernelRuntime.mapOccupancy.maps[] | select(.name == "sb_self_sockets") | .entries // 0] | add // 0'
+          }
+          # Root on a current kernel may set SO_MARK, so the mark fast path must be active.
+          grep -E 'self_bypass\W+socket_mark' sing-box.log
+          # A self-loop turns each request into a cascade of inbound connections.
+          for _ in 1 2 3; do
+            sudo curl -fsS -o /dev/null --max-time 20 https://www.gstatic.com/generate_204
+          done
+          inbound=$(grep -cE 'inbound connection to [^ ]*:443' sing-box.log || true)
+          echo "inbound :443 connections: $inbound" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$inbound" -le 20 ]
+          # Failed dials must not leave sing-box's sockets in the self-bypass map.
+          before=$(self_sockets)
+          for _ in $(seq 8); do
+            sudo curl -s -o /dev/null --max-time 10 https://192.0.2.1/ &
+          done
+          wait || true
+          sleep 5
+          after=$(self_sockets)
+          echo "sb_self_sockets: $before -> $after after failed dials" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$after" -le $((before + 2)) ]
 
       - name: Stop sing-box
         if: always()

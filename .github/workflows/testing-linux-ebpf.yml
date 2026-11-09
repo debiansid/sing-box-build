@@ -62,7 +62,7 @@ jobs:
         working-directory: source
         run: |
           set -euo pipefail
-          sudo env "PATH=$PATH" go test -v -count=1 -race -tags with_ebpf ./protocol/ebpf 2>&1 | tee ../verifier.log
+          sudo env "PATH=$PATH" go test -v -count=1 -race -tags with_ebpf ./protocol/ebpf ./common/dialer 2>&1 | tee ../verifier.log
 
       - name: Upload verifier log
         if: always()

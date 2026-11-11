@@ -181,10 +181,12 @@ jobs:
             source/sing-box api ebpf --deep --url 127.0.0.1:9090 \
               | jq '[.kernelRuntime.mapOccupancy.maps[] | select(.name == "sb_self_sockets") | .entries // 0] | add // 0'
           }
-          # Self-bypass registers socket cookies; "none" means sing-box's own dials are unprotected.
-          mode=$(grep -oE '"self_bypass":"[a-z_]+"' sing-box.log | head -n 1 | cut -d '"' -f 4)
-          echo "self-bypass mode: ${mode:-missing}" | tee -a "$GITHUB_STEP_SUMMARY"
-          [ -n "$mode" ] && [ "$mode" != none ]
+          # Self-bypass logs its backends only when active; a missing decision means sing-box's own dials are unprotected.
+          field() { grep -oE "\"self_bypass_$1\":\"[a-z_]+\"" sing-box.log | head -n 1 | cut -d '"' -f 4 || true; }
+          decision=$(field decision)
+          visibility=$(field visibility)
+          echo "self-bypass decision: ${decision:-missing}, visibility: ${visibility:-missing}" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ -n "$decision" ]
           # A self-loop turns each request into a cascade of outbound dials.
           for _ in 1 2 3; do
             sudo curl -fsS -o /dev/null --max-time 20 https://www.gstatic.com/generate_204
